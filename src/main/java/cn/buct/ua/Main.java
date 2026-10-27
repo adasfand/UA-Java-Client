@@ -33,7 +33,7 @@ public final class Main {
 
     static int run(String[] args) throws Exception {
         if (args.length == 0 || args[0].equals("帮助") || args[0].equals("--help")) {
-            System.out.println("用法：java -jar target/ua-java-client.jar 命令 本机配置/客户端.properties [参数]");
+            System.out.println("用法：java -jar target/ua-java-client.jar 命令 config/local/client.properties [参数]");
             System.out.println("命令：检查配置、发现、初始化证书、信任服务器 证书路径 SHA256、浏览 [NodeId]、读取 [别名]、写入 别名 值 --确认");
             return 0;
         }

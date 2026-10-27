@@ -1,7 +1,7 @@
 # 协作约定
 
-1. 使用 Java 21，提交前执行 `运行.ps1 构建` 或对应平台的 Maven Wrapper。
-2. 各自维护“本机配置”和“证书”，不要互传私钥或提交口令。提交前查看 `git diff --cached`。
+1. 使用 Java 21，提交前执行 `run.ps1 构建` 或对应平台的 Maven Wrapper。
+2. 各自维护“config/local”和“pki”，不要互传私钥或提交口令。提交前查看 `git diff --cached`。
 3. 新功能在个人分支开发，Pull Request 说明修改目的和验证结果。
 4. 连接参数、点位、周期等放外部配置，不在 Java 代码中硬编码生产地址。
 5. 通信层与未来桌面 UI 分离，网络 IO 不放 UI 线程。

@@ -2,10 +2,10 @@
 *.iml
 target/
 out/
-.缓存/
-本机配置/
-证书/
-日志/
+.cache/
+config/local/
+pki/
+logs/
 *.p12
 *.pfx
 *.key

@@ -11,7 +11,7 @@ class WriteSafetyTest {
     private ClientSettings settings(boolean enabled, String host, String environment) {
         return new ClientSettings(URI.create("opc.tcp://" + host + ":49320"), SecurityPolicy.Basic256,
                 MessageSecurityMode.SignAndEncrypt, "username", "test", "UA_PASSWORD", "urn:test",
-                "测试", 10000, Path.of("证书"), "UA_KEYSTORE_PASSWORD", Path.of("点位"), enabled, environment);
+                "测试", 10000, Path.of("pki"), "UA_KEYSTORE_PASSWORD", Path.of("nodes.properties"), enabled, environment);
     }
 
     private PointDefinition point(boolean writable) {
@@ -66,7 +66,7 @@ class WriteSafetyTest {
     }
 
     @Test void templateIsReadableAndWritesDisabled() throws Exception {
-        var config = ClientSettings.load(Path.of("配置模板/客户端.properties"));
+        var config = ClientSettings.load(Path.of("config/templates/client.properties"));
         assertFalse(config.writesEnabled());
         assertEquals("serverTime", config.points().getFirst().alias());
         assertFalse(config.points().getFirst().writable());

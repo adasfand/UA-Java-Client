@@ -28,9 +28,9 @@ public final class UaConnection implements AutoCloseable {
     public UaConnection(ClientSettings settings) throws Exception {
         this.settings = settings;
         var identity = LocalPki.load(settings);
-        trust = FileBasedTrustListManager.createAndInitialize(settings.pkiDirectory().resolve("信任库"));
+        trust = FileBasedTrustListManager.createAndInitialize(settings.pkiDirectory().resolve("trust-store"));
         try {
-            var rejected = settings.pkiDirectory().resolve("待核验证书");
+            var rejected = settings.pkiDirectory().resolve("rejected");
             Files.createDirectories(rejected);
             var validator = new DefaultClientCertificateValidator(trust, ValidationCheck.ALL_OPTIONAL_CHECKS,
                     new FileBasedCertificateQuarantine(rejected.toFile()));

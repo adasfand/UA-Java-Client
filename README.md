@@ -9,30 +9,30 @@
 ```text
 src/main/java/cn/buct/ua/    Java 通信与命令行源码
 src/test/java/cn/buct/ua/    写入门禁、类型与配置测试
-配置模板/                  可提交的中文配置模板，不含密码
-本机配置/                  各人自己的配置，不提交
-证书/                      各人自己的证书和私钥，不提交
-.缓存/                     Maven 依赖、发行包及临时文件，不提交
+config/templates/          可提交的配置模板，不含密码
+config/local/              各人自己的配置，不提交
+pki/                       各人自己的证书和私钥，不提交
+.cache/                    Maven 依赖、发行包及临时文件，不提交
 target/                    构建产物，不提交
-运行.ps1                   Windows 中文启动入口
+run.ps1                    Windows 中文启动入口
 ```
 
 本机工程放在 `E:\BUCT\UA\UA-Java-Client`，JDK 放在 `E:\Java\JDK21`。脚本把 Maven 用户目录、依赖仓库、构建临时文件和程序临时文件放在项目所在盘，不修改其他项目的全局 Maven 设置。项目移到别的电脑时，设置本机 `JAVA_HOME` 即可。
 
-IDEA 打开本目录的 `pom.xml`，选择 JDK 21。Maven 仓库通过 `.mvn/maven.config` 指向项目下的 `.缓存/Maven仓库`。如 IDEA 的 Maven 设置覆盖了项目设置，请把 Local repository 手工指向这个目录；Importer 和 Runner 同样选择 JDK 21。IDEA 自己的全局索引、插件和操作系统缓存不由本项目脚本管理。
+IDEA 打开本目录的 `pom.xml`，选择 JDK 21。Maven 仓库通过 `.mvn/maven.config` 指向项目下的 `.cache/maven-repository`。如 IDEA 的 Maven 设置覆盖了项目设置，请把 Local repository 手工指向这个目录；Importer 和 Runner 同样选择 JDK 21。IDEA 自己的全局索引、插件和操作系统缓存不由本项目脚本管理。
 
 ## 1. 构建
 
 在项目目录打开 PowerShell：
 
 ```powershell
-.\运行.ps1 构建
+.\run.ps1 构建
 ```
 
 首次需要联网下载固定版本依赖。生成 `target/ua-java-client.jar`。单独执行测试：
 
 ```powershell
-.\运行.ps1 测试
+.\run.ps1 测试
 ```
 
 跨平台可使用 JDK 21 和 Maven：`./mvnw verify`。Windows 也可直接执行 `mvnw.cmd verify`，但若要把 Maven 发行包与临时目录也留在项目盘，优先使用上面的 PowerShell 入口。
@@ -40,10 +40,10 @@ IDEA 打开本目录的 `pom.xml`，选择 JDK 21。Maven 仓库通过 `.mvn/mav
 ## 2. 准备个人配置
 
 ```powershell
-New-Item -ItemType Directory -Path 本机配置 -Force
-Copy-Item -LiteralPath 配置模板\客户端.properties -Destination 本机配置\客户端.properties
-.\运行.ps1 检查配置
-.\运行.ps1 发现
+New-Item -ItemType Directory -Path config/local -Force
+Copy-Item -LiteralPath config\templates\client.properties -Destination config\local\client.properties
+.\run.ps1 检查配置
+.\run.ps1 发现
 ```
 
 这些命令不需要业务账号密码，也不写业务点位。发现成功只代表服务器返回了端点，不代表认证会话和业务读写通过。
@@ -55,13 +55,13 @@ Copy-Item -LiteralPath 配置模板\客户端.properties -Destination 本机配�
 ## 3. 初始化客户端证书
 
 ```powershell
-.\运行.ps1 初始化证书
+.\run.ps1 初始化证书
 ```
 
 终端会隐藏输入证书库密码。它与 KEPServerEX 用户密码是两种不同的密码。已经生成的身份不会被自动覆盖，也不会每次启动重新生成。
 
-- `证书/客户端.p12`：含私钥，只留本机。
-- `证书/客户端公开证书.der`：可导入 KEPServerEX 的 OPC UA 配置管理器 → 受信任客户端。
+- `pki/client.p12`：含私钥，只留本机。
+- `pki/client.der`：可导入 KEPServerEX 的 OPC UA 配置管理器 → 受信任客户端。
 - `application.uri` 必须与证书的 URI 一致。多人开发时，各人配置一个独立 URI 并各自生成身份，不共享私钥。
 
 如果在 IDEA 运行时没有交互式控制台，程序会要求从本机环境变量 `UA_KEYSTORE_PASSWORD` 和 `UA_PASSWORD` 获取密码。只在本机设置，禁止写入命令参数、配置模板、截图、提交或日志。
@@ -71,10 +71,10 @@ Copy-Item -LiteralPath 配置模板\客户端.properties -Destination 本机配�
 从 KEPServerEX 配置管理器导出服务器公开证书，在服务器证书界面独立核对 SHA-256 指纹，再执行：
 
 ```powershell
-.\运行.ps1 信任服务器 本机配置\客户端.properties '服务器证书完整路径.der' '核对过的64位SHA256十六进制值'
+.\run.ps1 信任服务器 config\local\client.properties 'E:\path\server.der' '<SHA256>'
 ```
 
-程序会比较指纹，不符则拒绝导入。不要把发现服务返回的证书未经核对直接自动信任。
+将示例中的证书路径和 `<SHA256>` 替换为实际文件路径及核对过的 64 位十六进制指纹。程序会比较指纹，不符则拒绝导入。不要把发现服务返回的证书未经核对直接自动信任。
 
 客户端严格检查证书有效期、信任、ApplicationUri、主机名等，并开启会话端点校验。当前旧版 KEPServerEX 的证书曾显示 SHA1 签名、负序列号，以及缺少 `127.0.0.1` IP SAN；这可能影响现代客户端连接。遇到错误应按状态码核实和修正服务端证书/连接主机，不能通过“信任所有证书”处理。
 
@@ -83,10 +83,10 @@ Copy-Item -LiteralPath 配置模板\客户端.properties -Destination 本机配�
 双方证书准备好、账号密码保存后：
 
 ```powershell
-.\运行.ps1 浏览
-.\运行.ps1 浏览 本机配置\客户端.properties 'ns=0;i=85'
-.\运行.ps1 读取
-.\运行.ps1 读取 本机配置\客户端.properties serverTime
+.\run.ps1 浏览
+.\run.ps1 浏览 config\local\client.properties 'ns=0;i=85'
+.\run.ps1 读取
+.\run.ps1 读取 config\local\client.properties serverTime
 ```
 
 模板中的 `serverTime` 是标准服务器时间节点，用于首次读取，不是生产点位。读取输出包含值、StatusCode、源时间和服务时间；任一点质量不是 Good，命令返回非零退出码，不会打印“全部读取成功”。
@@ -95,7 +95,7 @@ Copy-Item -LiteralPath 配置模板\客户端.properties -Destination 本机配�
 
 1. 浏览实际节点，核实 NodeId、DataType 和权限。
 2. 从“浏览”输出的命名空间表中取得该索引对应的 URI。
-3. 复制点表模板到 `本机配置/点位.properties`，按模板填写并修改客户端配置中的 `nodes.file`。
+3. 复制点表模板到 `config/local/nodes.properties`，按模板填写并修改客户端配置中的 `nodes.file`。
 4. `nodes` 中列出要使用的别名。当前支持数字 `i` 和字符串 `s` 标识符；不把旧 DA ItemId 自动拼成 UA NodeId。
 
 程序连接后按 URI 解析命名空间索引，不假定每台服务器都是 `ns=2`。
@@ -113,7 +113,7 @@ Copy-Item -LiteralPath 配置模板\客户端.properties -Destination 本机配�
 - 命令携带 `--确认`。
 
 ```powershell
-.\运行.ps1 写入 本机配置\客户端.properties testValue 12.5 --确认
+.\run.ps1 写入 config\local\client.properties testValue 12.5 --确认
 ```
 
 写前读取质量必须为 Good。程序只写一次，核对逐点写状态，然后读取回值；不重试、不自动回滚，也不把多个写入当原子事务。读回与请求值不一致时返回失败，不能据此断言写操作完全没有影响。
@@ -135,7 +135,7 @@ git push -u origin main
 
 ## 当前验收边界
 
-具体构建和本机运行结果记录在 `验证记录.md`。源码具备连接读写入口，不代表生产接口、用户密码和完整工艺逻辑已经验证。本项目第一阶段先完成通信，后续再实现 JavaFX/Swing 桌面 UI。
+具体构建和本机运行结果记录在 `VERIFICATION.md`。源码具备连接读写入口，不代表生产接口、用户密码和完整工艺逻辑已经验证。本项目第一阶段先完成通信，后续再实现 JavaFX/Swing 桌面 UI。
 
 主要参考：
 

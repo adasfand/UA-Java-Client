@@ -27,7 +27,7 @@ public final class LocalPki {
 
     public static void initialize(ClientSettings settings) throws Exception {
         Path directory = settings.pkiDirectory();
-        Path target = directory.resolve("客户端.p12");
+        Path target = directory.resolve("client.p12");
         Files.createDirectories(directory);
         if (Files.exists(target)) throw new IllegalArgumentException("客户端证书已存在，不覆盖：" + target);
         char[] password = secret(settings.pkiPasswordEnv(), "设置本机证书库密码");
@@ -45,9 +45,9 @@ public final class LocalPki {
             temporary = Files.createTempFile(directory, "identity-", ".tmp");
             try (OutputStream out = Files.newOutputStream(temporary)) { store.store(out, password); }
             Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE);
-            Files.write(directory.resolve("客户端公开证书.der"), certificate.getEncoded());
+            Files.write(directory.resolve("client.der"), certificate.getEncoded());
             System.out.println("客户端身份已保存：" + target);
-            System.out.println("请将 客户端公开证书.der 导入服务器的受信任客户端；不要发送 p12 私钥文件。");
+            System.out.println("请将 client.der 导入服务器的受信任客户端；不要发送 p12 私钥文件。");
         } finally {
             Arrays.fill(password, '\0');
             if (temporary != null) Files.deleteIfExists(temporary);
@@ -56,7 +56,7 @@ public final class LocalPki {
 
     public static Identity load(ClientSettings settings) throws Exception {
         char[] password = secret(settings.pkiPasswordEnv(), "输入本机证书库密码");
-        try (InputStream in = Files.newInputStream(settings.pkiDirectory().resolve("客户端.p12"))) {
+        try (InputStream in = Files.newInputStream(settings.pkiDirectory().resolve("client.p12"))) {
             KeyStore store = KeyStore.getInstance("PKCS12");
             store.load(in, password);
             X509Certificate certificate = (X509Certificate) store.getCertificate(ALIAS);
@@ -84,7 +84,7 @@ public final class LocalPki {
         if (!normalized.matches("(?i)[0-9a-f]{64}") || !fingerprint.equalsIgnoreCase(normalized)) {
             throw new IllegalArgumentException("证书 SHA-256 与人工核对值不符，未导入");
         }
-        try (var trust = FileBasedTrustListManager.createAndInitialize(settings.pkiDirectory().resolve("信任库"))) {
+        try (var trust = FileBasedTrustListManager.createAndInitialize(settings.pkiDirectory().resolve("trust-store"))) {
             trust.addTrustedCertificate(certificate);
         }
         System.out.println("已导入人工确认的服务器证书，SHA-256：" + fingerprint);
