@@ -64,7 +64,9 @@ Copy-Item -LiteralPath config\templates\client.properties -Destination config\lo
 - `pki/client.der`：可导入 KEPServerEX 的 OPC UA 配置管理器 → 受信任客户端。
 - `application.uri` 必须与证书的 URI 一致。多人开发时，各人配置一个独立 URI 并各自生成身份，不共享私钥。
 
-如果在 IDEA 运行时没有交互式控制台，程序会要求从本机环境变量 `UA_KEYSTORE_PASSWORD` 和 `UA_PASSWORD` 获取密码。只在本机设置，禁止写入命令参数、配置模板、截图、提交或日志。
+在终端中运行时，程序通过控制台隐藏输入；在 IDEA 中没有交互式控制台时，会弹出本机密码输入框。操作者自行输入并确认，密码只在当前进程中使用。也可从本机环境变量 `UA_KEYSTORE_PASSWORD` 和 `UA_PASSWORD` 获取密码；禁止将密码写入共享运行配置、配置模板、截图、提交或日志。
+
+项目的 `.run/` 提供共享 IDEA 运行配置：`01 配置检查`、`02 端点发现`、`03 初始化客户端证书`、`04 浏览节点`、`05 读取点位`、`06 浏览模拟点`，以及需单独准备本机测试配置的 `07 模拟写入42并回读`。它们不保存密码，使用项目 JDK、相对路径和 Maven 模块依赖。UI 联调步骤与前置检查见 [UI_TEST.md](UI_TEST.md)。
 
 ## 4. 人工核验并信任服务器
 
@@ -85,11 +87,14 @@ Copy-Item -LiteralPath config\templates\client.properties -Destination config\lo
 ```powershell
 .\run.ps1 浏览
 .\run.ps1 浏览 config\local\client.properties 'ns=0;i=85'
+.\run.ps1 浏览 config\local\client.properties 'ns=0;i=85' 3
 .\run.ps1 读取
 .\run.ps1 读取 config\local\client.properties serverTime
 ```
 
 模板中的 `serverTime` 是标准服务器时间节点，用于首次读取，不是生产点位。读取输出包含值、StatusCode、源时间和服务时间；任一点质量不是 Good，命令返回非零退出码，不会打印“全部读取成功”。
+
+浏览默认一层，可显式指定 1—3 层；多层模式输出变量 DataType、ValueRank 和当前用户的读写属性，最多处理 500 个引用。从 Objects 出发时只递归应用命名空间中的对象，避免展开整个标准服务器子树。达到上限会返回失败，提示指定更具体的根节点。可写属性不代表已确认适合测试写入，还需核对 Simulator 地址与静态存储性质。
 
 添加模拟点时：
 

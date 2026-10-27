@@ -2,6 +2,8 @@ package cn.buct.ua;
 
 import java.nio.file.Files;
 import java.util.Arrays;
+import java.util.ArrayDeque;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
@@ -16,6 +18,7 @@ import org.eclipse.milo.opcua.stack.core.types.builtin.DataValue;
 import org.eclipse.milo.opcua.stack.core.types.builtin.NodeId;
 import org.eclipse.milo.opcua.stack.core.types.builtin.Variant;
 import org.eclipse.milo.opcua.stack.core.types.enumerated.TimestampsToReturn;
+import org.eclipse.milo.opcua.stack.core.types.enumerated.NodeClass;
 import org.eclipse.milo.opcua.stack.core.util.validation.ValidationCheck;
 import static org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.Unsigned.uint;
 
@@ -36,7 +39,7 @@ public final class UaConnection implements AutoCloseable {
                     new FileBasedCertificateQuarantine(rejected.toFile()));
             IdentityProvider provider;
             if (settings.identityType().equals("username")) {
-                char[] password = LocalPki.secret(settings.passwordEnv(), "输入 KEPServerEX 用户密码");
+                char[] password = LocalPki.secret(settings.passwordEnv(), "输入 KEPServerEX 用户 " + settings.username() + " 的密码");
                 try { provider = new UsernameProvider(settings.username(), new String(password), validator); }
                 finally { Arrays.fill(password, '\0'); }
             } else provider = new AnonymousProvider();
@@ -56,16 +59,48 @@ public final class UaConnection implements AutoCloseable {
             client.connectAsync().get(settings.timeoutMs(), TimeUnit.MILLISECONDS);
             System.out.println("已建立认证会话：" + settings.endpoint());
         } catch (Exception e) {
+            System.err.println("认证会话尚未建立；未执行浏览、读取或写入。");
             try { close(); } catch (Exception cleanup) { e.addSuppressed(cleanup); }
             throw e;
         }
     }
 
     public void browse(NodeId parent) throws Exception {
-        var references = client.getAddressSpace().browse(parent);
-        System.out.println("浏览节点：" + parent + "，引用数量：" + references.size());
-        for (var reference : references) {
-            System.out.printf("名称=%s | 节点=%s | 类别=%s%n", reference.getBrowseName(), reference.getNodeId(), reference.getNodeClass());
+        browse(parent, 1);
+    }
+
+    /** 有界只读浏览；从 Objects 出发时不递归标准服务器节点，只展开应用对象。 */
+    public void browse(NodeId parent, int depth) throws Exception {
+        if (depth < 1 || depth > 3) throw new IllegalArgumentException("浏览层数必须为 1—3");
+        record Pending(NodeId id, int level) {}
+        var pending = new ArrayDeque<Pending>();
+        var visited = new HashSet<NodeId>();
+        pending.add(new Pending(parent, 1));
+        int count = 0;
+        while (!pending.isEmpty()) {
+            var current = pending.removeFirst();
+            if (!visited.add(current.id())) continue;
+            var references = client.getAddressSpace().browse(current.id());
+            System.out.printf("浏览节点：%s，引用数量：%d%n", current.id().toParseableString(), references.size());
+            for (var reference : references) {
+                if (++count > 500) throw new IllegalStateException("浏览已达 500 个引用上限，请指定更具体的根节点；结果不完整");
+                var local = reference.getNodeId().isLocal()
+                        ? reference.getNodeId().toNodeId(client.getNamespaceTable()) : java.util.Optional.<NodeId>empty();
+                System.out.printf("  名称=%s | 类别=%s%n", reference.getBrowseName().getName(), reference.getNodeClass());
+                System.out.println("    NodeId=" + local.map(NodeId::toParseableString).orElse(reference.getNodeId().toString()));
+                if (local.isEmpty()) continue;
+                NodeId id = local.get();
+                if (depth > 1 && reference.getNodeClass() == NodeClass.Variable) {
+                    var variable = client.getAddressSpace().getVariableNode(id);
+                    int access = variable.readUserAccessLevel().intValue();
+                    System.out.printf("    DataType=%s | ValueRank=%d | 当前用户可读=%s | 当前用户可写=%s%n",
+                            variable.readDataType().toParseableString(), variable.readValueRank(), (access & 1) != 0, (access & 2) != 0);
+                }
+                if (current.level() < depth && reference.getNodeClass() == NodeClass.Object
+                        && id.getNamespaceIndex().intValue() != 0) {
+                    pending.addLast(new Pending(id, current.level() + 1));
+                }
+            }
         }
         System.out.println("命名空间：" + Arrays.toString(client.getNamespaceTable().toArray()));
     }
