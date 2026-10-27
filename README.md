@@ -6,6 +6,8 @@
 
 整体调用逻辑、配置泛化能力与边界见 [CODE_GUIDE.md](CODE_GUIDE.md)。
 
+尚待执行的验证见 [TODO.md](TODO.md)；本机界面操作见 [UI_TEST.md](UI_TEST.md)。
+
 ## 目录与环境
 
 ```text
