@@ -7,7 +7,13 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BiFunction;
+import java.nio.CharBuffer;
+import java.nio.charset.StandardCharsets;
 import org.eclipse.milo.opcua.sdk.client.OpcUaClient;
+import org.eclipse.milo.opcua.sdk.client.OpcUaClientConfig;
+import org.eclipse.milo.opcua.stack.core.AttributeId;
+import org.eclipse.milo.opcua.stack.core.UaException;
 import org.eclipse.milo.opcua.sdk.client.identity.AnonymousProvider;
 import org.eclipse.milo.opcua.sdk.client.identity.IdentityProvider;
 import org.eclipse.milo.opcua.sdk.client.identity.UsernameProvider;
@@ -17,6 +23,12 @@ import org.eclipse.milo.opcua.stack.core.security.FileBasedTrustListManager;
 import org.eclipse.milo.opcua.stack.core.types.builtin.DataValue;
 import org.eclipse.milo.opcua.stack.core.types.builtin.NodeId;
 import org.eclipse.milo.opcua.stack.core.types.builtin.Variant;
+import org.eclipse.milo.opcua.stack.core.types.builtin.QualifiedName;
+import org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.UByte;
+import org.eclipse.milo.opcua.stack.core.types.structured.ReadValueId;
+import org.eclipse.milo.opcua.stack.core.types.structured.WriteValue;
+import org.eclipse.milo.opcua.stack.core.types.structured.WriteRequest;
+import org.eclipse.milo.opcua.stack.core.types.structured.WriteResponse;
 import org.eclipse.milo.opcua.stack.core.types.enumerated.TimestampsToReturn;
 import org.eclipse.milo.opcua.stack.core.types.enumerated.NodeClass;
 import org.eclipse.milo.opcua.stack.core.util.validation.ValidationCheck;
@@ -27,10 +39,20 @@ public final class UaConnection implements AutoCloseable {
     private final ClientSettings settings;
     private final FileBasedTrustListManager trust;
     private OpcUaClient client;
+    private byte[] userPassword;
+    private boolean closed;
+
+    public record ReadResult(String alias, NodeId nodeId, DataValue value) {}
+    private record VariableMetadata(NodeId dataType, int valueRank, int access) {}
 
     public UaConnection(ClientSettings settings) throws Exception {
+        this(settings, LocalPki::secret);
+    }
+
+    /** 阻塞连接入口，应由桌面 UI 的后台任务调用；凭据数组交给本连接管理并清零。 */
+    public UaConnection(ClientSettings settings, BiFunction<String, String, char[]> credentials) throws Exception {
         this.settings = settings;
-        var identity = LocalPki.load(settings);
+        var identity = LocalPki.load(settings, credentials);
         trust = FileBasedTrustListManager.createAndInitialize(settings.pkiDirectory().resolve("trust-store"));
         try {
             var rejected = settings.pkiDirectory().resolve("rejected");
@@ -39,23 +61,26 @@ public final class UaConnection implements AutoCloseable {
                     new FileBasedCertificateQuarantine(rejected.toFile()));
             IdentityProvider provider;
             if (settings.identityType().equals("username")) {
-                char[] password = LocalPki.secret(settings.passwordEnv(), "输入 KEPServerEX 用户 " + settings.username() + " 的密码");
-                try { provider = new UsernameProvider(settings.username(), new String(password), validator); }
+                char[] password = LocalPki.requestSecret(credentials, settings.passwordEnv(), "输入 OPC UA 用户 " + settings.username() + " 的密码");
+                try {
+                    var encoded = StandardCharsets.UTF_8.encode(CharBuffer.wrap(password));
+                    userPassword = new byte[encoded.remaining()];
+                    encoded.get(userPassword);
+                    if (encoded.hasArray()) Arrays.fill(encoded.array(), (byte) 0);
+                    provider = new UsernameProvider(settings.username(), this::passwordForSession, validator);
+                }
                 finally { Arrays.fill(password, '\0'); }
             } else provider = new AnonymousProvider();
-            client = OpcUaClient.create(settings.endpoint().toString(), endpoints -> endpoints.stream()
-                            .filter(e -> settings.acceptsEndpoint(e.getEndpointUrl()))
-                            .filter(e -> settings.policy().getUri().equals(e.getSecurityPolicyUri()))
-                            .filter(e -> settings.mode() == e.getSecurityMode())
-                            .filter(e -> Arrays.stream(e.getUserIdentityTokens()).anyMatch(t ->
-                                    t.getTokenType().name().equals(settings.identityType().equals("username") ? "UserName" : "Anonymous")))
-                            .findFirst(), transport -> transport.setConnectTimeout(uint(settings.timeoutMs()))
-                                    .setAcknowledgeTimeout(uint(settings.timeoutMs())), builder -> builder
+            var endpoints = UaServices.discover(settings.discoveryEndpoint().toString(), settings.timeoutMs());
+            var selected = settings.selectEndpoint(endpoints);
+            var configuration = OpcUaClientConfig.builder().setEndpoint(selected).setDiscoveryEndpoints(endpoints)
                             .setApplicationName(org.eclipse.milo.opcua.stack.core.types.builtin.LocalizedText.english(settings.applicationName()))
                             .setApplicationUri(settings.applicationUri())
                             .setKeyPair(identity.keyPair()).setCertificate(identity.certificate()).setCertificateChain(identity.chain())
                             .setCertificateValidator(validator).setSessionEndpointValidationEnabled(true)
-                            .setIdentityProvider(provider).setRequestTimeout(uint(settings.timeoutMs())));
+                            .setIdentityProvider(provider).setRequestTimeout(uint(settings.timeoutMs())).build();
+            client = OpcUaClient.create(configuration, transport -> transport.setConnectTimeout(uint(settings.timeoutMs()))
+                    .setAcknowledgeTimeout(uint(settings.timeoutMs())));
             client.connectAsync().get(settings.timeoutMs(), TimeUnit.MILLISECONDS);
             System.out.println("已建立认证会话：" + settings.endpoint());
         } catch (Exception e) {
@@ -63,6 +88,11 @@ public final class UaConnection implements AutoCloseable {
             try { close(); } catch (Exception cleanup) { e.addSuppressed(cleanup); }
             throw e;
         }
+    }
+
+    private synchronized byte[] passwordForSession() {
+        if (closed || userPassword == null) throw new IllegalStateException("连接已关闭，不能再次提供凭据");
+        return userPassword.clone();
     }
 
     public void browse(NodeId parent) throws Exception {
@@ -80,7 +110,7 @@ public final class UaConnection implements AutoCloseable {
         while (!pending.isEmpty()) {
             var current = pending.removeFirst();
             if (!visited.add(current.id())) continue;
-            var references = client.getAddressSpace().browse(current.id());
+            var references = UaServices.browse(client, current.id(), settings.timeoutMs(), 500 - count);
             System.out.printf("浏览节点：%s，引用数量：%d%n", current.id().toParseableString(), references.size());
             for (var reference : references) {
                 if (++count > 500) throw new IllegalStateException("浏览已达 500 个引用上限，请指定更具体的根节点；结果不完整");
@@ -91,10 +121,10 @@ public final class UaConnection implements AutoCloseable {
                 if (local.isEmpty()) continue;
                 NodeId id = local.get();
                 if (depth > 1 && reference.getNodeClass() == NodeClass.Variable) {
-                    var variable = client.getAddressSpace().getVariableNode(id);
-                    int access = variable.readUserAccessLevel().intValue();
+                    var metadata = metadata(id);
+                    int access = metadata.access();
                     System.out.printf("    DataType=%s | ValueRank=%d | 当前用户可读=%s | 当前用户可写=%s%n",
-                            variable.readDataType().toParseableString(), variable.readValueRank(), (access & 1) != 0, (access & 2) != 0);
+                            metadata.dataType().toParseableString(), metadata.valueRank(), (access & 1) != 0, (access & 2) != 0);
                 }
                 if (current.level() < depth && reference.getNodeClass() == NodeClass.Object
                         && id.getNamespaceIndex().intValue() != 0) {
@@ -112,46 +142,93 @@ public final class UaConnection implements AutoCloseable {
     }
 
     public void read(List<PointDefinition> points) throws Exception {
-        List<NodeId> ids = points.stream().map(this::resolve).toList();
-        List<DataValue> values = client.readValues(0.0, TimestampsToReturn.Both, ids);
-        if (values.size() != points.size()) throw new IllegalStateException("读取返回数量与请求不一致");
+        List<ReadResult> results = readValues(points);
         boolean failed = false;
-        for (int i = 0; i < values.size(); i++) {
-            DataValue value = values.get(i);
+        for (ReadResult result : results) {
+            DataValue value = result.value();
             System.out.printf("点位=%s | 节点=%s | 值=%s | 状态=%s | 源时间=%s | 服务时间=%s%n",
-                    points.get(i).alias(), ids.get(i), value.getValue(), value.getStatusCode(), value.getSourceTime(), value.getServerTime());
+                    result.alias(), result.nodeId(), value.getValue(), value.getStatusCode(), value.getSourceTime(), value.getServerTime());
             failed |= value.getStatusCode() == null || !value.getStatusCode().isGood();
         }
         if (failed) throw new IllegalStateException("存在读取失败或质量非 Good 的点位，不能按成功处理");
+    }
+
+    /** 返回原始类型、质量和时间戳，供桌面界面处理；非 Good 状态也保留在结果中。 */
+    public List<ReadResult> readValues(List<PointDefinition> points) throws Exception {
+        List<NodeId> ids = points.stream().map(this::resolve).toList();
+        List<DataValue> values = client.readValuesAsync(0.0, TimestampsToReturn.Both, ids)
+                .get(settings.timeoutMs(), TimeUnit.MILLISECONDS);
+        if (values.size() != points.size()) throw new IllegalStateException("读取返回数量与请求不一致");
+        var results = new java.util.ArrayList<ReadResult>();
+        for (int i = 0; i < values.size(); i++) {
+            results.add(new ReadResult(points.get(i).alias(), ids.get(i), values.get(i)));
+        }
+        return List.copyOf(results);
+    }
+
+    private VariableMetadata metadata(NodeId id) throws Exception {
+        var attributes = List.of(AttributeId.DataType, AttributeId.ValueRank, AttributeId.UserAccessLevel);
+        var requests = attributes.stream().map(a -> new ReadValueId(id, a.uid(), null, QualifiedName.NULL_VALUE)).toList();
+        var values = client.readAsync(0.0, TimestampsToReturn.Neither, requests)
+                .get(settings.timeoutMs(), TimeUnit.MILLISECONDS).getResults();
+        if (values == null || values.length != 3) throw new IllegalStateException("变量属性返回数量异常");
+        for (DataValue value : values) {
+            if (value == null || value.getStatusCode() == null) throw new IllegalStateException("变量属性缺少质量码");
+            if (!value.getStatusCode().isGood()) throw new UaException(value.getStatusCode());
+        }
+        return new VariableMetadata((NodeId) values[0].getValue().getValue(),
+                (Integer) values[1].getValue().getValue(), ((UByte) values[2].getValue().getValue()).intValue());
     }
 
     public void write(PointDefinition point, String text, boolean confirmed) throws Exception {
         settings.requireWrite(point, confirmed);
         Object typed = point.parseWriteValue(text);
         NodeId id = resolve(point);
-        var variable = client.getAddressSpace().getVariableNode(id);
-        NodeId actualType = variable.readDataType();
+        var metadata = metadata(id);
+        NodeId actualType = metadata.dataType();
         NodeId expectedType = new NodeId(0, switch (point.dataType()) {
             case "Boolean" -> 1; case "SByte" -> 2; case "Byte" -> 3; case "Int16" -> 4;
             case "UInt16" -> 5; case "Int32" -> 6; case "UInt32" -> 7; case "Int64" -> 8;
             case "UInt64" -> 9; case "Float" -> 10; case "Double" -> 11; case "String" -> 12;
             default -> throw new IllegalArgumentException("不支持写入此类型");
         });
-        if (!actualType.equals(expectedType) || variable.readValueRank() != -1) {
+        if (!actualType.equals(expectedType) || metadata.valueRank() != -1) {
             throw new IllegalArgumentException("服务器 DataType / ValueRank 与配置的标量类型不符，未写入");
         }
-        if ((variable.readUserAccessLevel().intValue() & 2) == 0) {
+        if ((metadata.access() & 2) == 0) {
             throw new IllegalArgumentException("当前用户没有该点位的写权限，未写入");
         }
-        var before = client.readValue(0.0, TimestampsToReturn.Both, id);
+        var before = client.readValuesAsync(0.0, TimestampsToReturn.Both, List.of(id))
+                .get(settings.timeoutMs(), TimeUnit.MILLISECONDS).getFirst();
         if (before.getStatusCode() == null || !before.getStatusCode().isGood()) throw new IllegalStateException("写前读取质量异常，未写入");
-        var statuses = client.writeValues(List.of(id), List.of(DataValue.valueOnly(new Variant(typed))));
-        if (statuses.size() != 1 || statuses.get(0) == null || !statuses.get(0).isGood()) {
-            throw new IllegalStateException("写入返回失败：" + statuses);
+        // 只使用当前已激活会话；不等待新会话。传输等待阶段可通过原始 future 取消。
+        var session = client.getSessionAsync().getNow(null);
+        if (session == null) throw new IllegalStateException("当前没有已激活会话，未提交写入");
+        var request = new WriteRequest(client.newRequestHeader(session.getAuthenticationToken()),
+                new WriteValue[]{new WriteValue(id, AttributeId.Value.uid(), null, DataValue.valueOnly(new Variant(typed)))});
+        WriteResponse response;
+        var writeFuture = client.getTransport().sendRequestMessage(request);
+        try {
+            response = (WriteResponse) writeFuture.get(settings.timeoutMs(), TimeUnit.MILLISECONDS);
+        } catch (Exception e) {
+            // 取消原始 thenCompose future，阻止尚未获取通道的请求稍后提交；已发出的请求结果仍可能未知。
+            writeFuture.cancel(false);
+            try { close(); } catch (Exception cleanup) { e.addSuppressed(cleanup); }
+            throw new IllegalStateException("写请求未得到确认，结果可能未知；已请求断开，不自动重试", e);
         }
-        DataValue after = client.readValue(0.0, TimestampsToReturn.Both, id);
+        var statuses = response.getResults();
+        if (statuses == null || statuses.length != 1 || statuses[0] == null || !statuses[0].isGood()) {
+            throw new IllegalStateException("写入返回失败：" + Arrays.toString(statuses));
+        }
+        DataValue after;
+        try {
+            after = client.readValuesAsync(0.0, TimestampsToReturn.Both, List.of(id))
+                    .get(settings.timeoutMs(), TimeUnit.MILLISECONDS).getFirst();
+        } catch (Exception e) {
+            throw new IllegalStateException("写服务已返回 Good，但回读未完成，当前值未确认；不自动重试或回滚", e);
+        }
         System.out.printf("模拟写入：点位=%s | 旧值=%s | 请求值=%s | 写状态=%s | 读回=%s | 读回状态=%s%n",
-                point.alias(), before.getValue(), typed, statuses.get(0), after.getValue(), after.getStatusCode());
+                point.alias(), before.getValue(), typed, statuses[0], after.getValue(), after.getStatusCode());
         if (after.getStatusCode() == null || !after.getStatusCode().isGood()
                 || !Objects.equals(typed, after.getValue().getValue())) {
             throw new IllegalStateException("写服务已接受，但读回未确认匹配；不重试、不自动回滚");
@@ -159,8 +236,26 @@ public final class UaConnection implements AutoCloseable {
     }
 
     @Override public void close() throws Exception {
+        synchronized (this) {
+            if (closed) return;
+            closed = true;
+            if (userPassword != null) Arrays.fill(userPassword, (byte) 0);
+        }
+        Exception failure = null;
         try {
             if (client != null) client.disconnectAsync().get(settings.timeoutMs(), TimeUnit.MILLISECONDS);
-        } finally { trust.close(); }
+        } catch (Exception e) { failure = e; }
+        finally {
+            if (client != null) {
+                try { client.getTransport().disconnect().get(Math.min(settings.timeoutMs(), 5000), TimeUnit.MILLISECONDS); }
+                catch (Exception cleanup) { if (failure == null) failure = cleanup; else failure.addSuppressed(cleanup); }
+            }
+            try { trust.close(); }
+            catch (Exception cleanup) { if (failure == null) failure = cleanup; else failure.addSuppressed(cleanup); }
+        }
+        if (failure != null) {
+            if (failure instanceof InterruptedException) Thread.currentThread().interrupt();
+            throw failure;
+        }
     }
 }

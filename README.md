@@ -2,7 +2,9 @@
 
 这是项目第一阶段的通信层，使用 Java 21、Maven 和 Eclipse Milo 1.1.6。提供中文命令行入口，后续桌面 UI 可以复用同一通信层。
 
-当前功能：外部配置检查、端点发现、客户端证书生成、按人工确认的指纹导入服务器证书、认证连接、节点浏览、读取，以及默认关闭的模拟点写入与回读。暂未实现桌面界面、趋势分析、订阅和断线重连，也不包含工艺控制程序。
+当前功能：外部配置检查、独立发现地址、可配置客户端身份、按人工确认的指纹导入服务器证书、认证连接、逐页节点浏览、结构化读取，以及默认关闭的模拟点写入与回读。桌面界面、趋势分析、订阅和应用层连接状态/恢复策略尚未实现；Milo 自身提供保活和会话恢复机制。
+
+整体调用逻辑、配置泛化能力与边界见 [CODE_GUIDE.md](CODE_GUIDE.md)。
 
 ## 目录与环境
 
@@ -64,6 +66,8 @@ Copy-Item -LiteralPath config\templates\client.properties -Destination config\lo
 - `pki/client.der`：可导入 KEPServerEX 的 OPC UA 配置管理器 → 受信任客户端。
 - `application.uri` 必须与证书的 URI 一致。多人开发时，各人配置一个独立 URI 并各自生成身份，不共享私钥。
 
+`pki.file`、`pki.alias` 可选择 PKI 目录内已有的 PKCS12/PFX 私钥身份；生成时的名称、组织、DNS/IP SAN、有效天数由 `pki.*` 配置。模板中的 localhost/回环地址仅用于本机示例，部署时按实际环境填写；已有证书不会因修改配置而自动更新。`client.der` 是公开导出文件名，不能用作私钥库文件名。
+
 在终端中运行时，程序通过控制台隐藏输入；在 IDEA 中没有交互式控制台时，会弹出本机密码输入框。操作者自行输入并确认，密码只在当前进程中使用。也可从本机环境变量 `UA_KEYSTORE_PASSWORD` 和 `UA_PASSWORD` 获取密码；禁止将密码写入共享运行配置、配置模板、截图、提交或日志。
 
 项目的 `.run/` 提供共享 IDEA 运行配置：`01 配置检查`、`02 端点发现`、`03 初始化客户端证书`、`04 浏览节点`、`05 读取点位`、`06 浏览模拟点`，以及需单独准备本机测试配置的 `07 模拟写入42并回读`。它们不保存密码，使用项目 JDK、相对路径和 Maven 模块依赖。UI 联调步骤与前置检查见 [UI_TEST.md](UI_TEST.md)。
@@ -101,7 +105,7 @@ Copy-Item -LiteralPath config\templates\client.properties -Destination config\lo
 1. 浏览实际节点，核实 NodeId、DataType 和权限。
 2. 从“浏览”输出的命名空间表中取得该索引对应的 URI。
 3. 复制点表模板到 `config/local/nodes.properties`，按模板填写并修改客户端配置中的 `nodes.file`。
-4. `nodes` 中列出要使用的别名。当前支持数字 `i` 和字符串 `s` 标识符；不把旧 DA ItemId 自动拼成 UA NodeId。
+4. `nodes` 中列出要使用的别名。支持数字 `i`、字符串 `s`、GUID `g`、Base64 ByteString `b` 标识符；不把旧 DA ItemId 自动拼成 UA NodeId。
 
 程序连接后按 URI 解析命名空间索引，不假定每台服务器都是 `ns=2`。
 

@@ -2,8 +2,6 @@ package cn.buct.ua;
 
 import java.nio.file.Path;
 import java.util.Arrays;
-import java.util.concurrent.TimeUnit;
-import org.eclipse.milo.opcua.sdk.client.DiscoveryClient;
 import org.eclipse.milo.opcua.stack.core.Stack;
 import org.eclipse.milo.opcua.stack.core.types.builtin.NodeId;
 
@@ -26,7 +24,7 @@ public final class Main {
             if (cause instanceof java.nio.file.NoSuchFileException missing) {
                 System.err.println("所需本机文件不存在：" + missing.getFile());
             }
-            if (e instanceof IllegalArgumentException && e.getStackTrace().length > 0
+            if ((e instanceof IllegalArgumentException || e instanceof IllegalStateException) && e.getStackTrace().length > 0
                     && e.getStackTrace()[0].getClassName().startsWith("cn.buct.ua.")) {
                 System.err.println("配置或操作原因：" + e.getMessage());
             }
@@ -58,10 +56,7 @@ public final class Main {
                 return 0;
             }
             case "发现" -> {
-                var endpoints = DiscoveryClient.getEndpoints(settings.endpoint().toString(), transport -> transport
-                                .setConnectTimeout(org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.Unsigned.uint(settings.timeoutMs()))
-                                .setAcknowledgeTimeout(org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.Unsigned.uint(settings.timeoutMs())))
-                        .get(settings.timeoutMs(), TimeUnit.MILLISECONDS);
+                var endpoints = UaServices.discover(settings.discoveryEndpoint().toString(), settings.timeoutMs());
                 var fingerprints = new java.util.HashSet<String>();
                 for (var endpoint : endpoints) {
                     System.out.printf("地址=%s | 策略=%s | 模式=%s | 身份=%s%n", endpoint.getEndpointUrl(),
@@ -69,8 +64,7 @@ public final class Main {
                             Arrays.toString(Arrays.stream(endpoint.getUserIdentityTokens()).map(t -> t.getTokenType().name()).toArray()));
                     byte[] certificate = endpoint.getServerCertificate().bytes();
                     if (certificate != null && certificate.length > 0) {
-                        String fingerprint = java.util.HexFormat.of().formatHex(
-                                java.security.MessageDigest.getInstance("SHA-256").digest(certificate));
+                        String fingerprint = LocalPki.fingerprint(certificate);
                         if (fingerprints.add(fingerprint)) System.out.println("服务器证书 SHA-256：" + fingerprint);
                     }
                 }

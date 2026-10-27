@@ -1,6 +1,9 @@
 package cn.buct.ua;
 
 import java.math.BigDecimal;
+import java.util.Base64;
+import java.util.UUID;
+import org.eclipse.milo.opcua.stack.core.types.builtin.ByteString;
 import org.eclipse.milo.opcua.stack.core.types.builtin.NodeId;
 import org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.Unsigned;
 
@@ -8,10 +11,13 @@ import org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.Unsigned;
 public record PointDefinition(String alias, String namespaceUri, String identifierType,
         String identifier, String dataType, boolean writable, String minimum, String maximum) {
     public PointDefinition {
-        if (!identifierType.equals("i") && !identifierType.equals("s")) {
-            throw new IllegalArgumentException("首版点位标识符仅支持 i 或 s：" + alias);
+        switch (identifierType) {
+            case "i" -> Unsigned.uint(identifier);
+            case "s" -> { if (identifier.isEmpty()) throw new IllegalArgumentException("字符串标识符不能为空"); }
+            case "g" -> { if (!UUID.fromString(identifier).toString().equalsIgnoreCase(identifier)) throw new IllegalArgumentException("GUID 格式不完整"); }
+            case "b" -> { if (Base64.getDecoder().decode(identifier).length == 0) throw new IllegalArgumentException("ByteString 标识符不能为空"); }
+            default -> throw new IllegalArgumentException("点位标识符仅支持 i、s、g 或 b：" + alias);
         }
-        if (identifierType.equals("i")) Unsigned.uint(identifier);
         if (writable && !dataType.equals("Boolean") && !dataType.equals("String")) {
             if (minimum == null || maximum == null || new BigDecimal(minimum).compareTo(new BigDecimal(maximum)) > 0) {
                 throw new IllegalArgumentException("数值写入点必须配置有效 minimum/maximum：" + alias);
@@ -20,8 +26,13 @@ public record PointDefinition(String alias, String namespaceUri, String identifi
     }
 
     public NodeId nodeId(int namespaceIndex) {
-        return identifierType.equals("i") ? new NodeId(namespaceIndex, Unsigned.uint(identifier))
-                : new NodeId(namespaceIndex, identifier);
+        return switch (identifierType) {
+            case "i" -> new NodeId(namespaceIndex, Unsigned.uint(identifier));
+            case "s" -> new NodeId(namespaceIndex, identifier);
+            case "g" -> new NodeId(namespaceIndex, UUID.fromString(identifier));
+            case "b" -> new NodeId(namespaceIndex, ByteString.of(Base64.getDecoder().decode(identifier)));
+            default -> throw new IllegalStateException("未验证的标识符类型");
+        };
     }
 
     public Object parseWriteValue(String text) {
