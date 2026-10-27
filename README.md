@@ -17,7 +17,7 @@ target/                    构建产物，不提交
 run.ps1                    Windows 中文启动入口
 ```
 
-本机工程放在 `E:\BUCT\UA\UA-Java-Client`，JDK 放在 `E:\Java\JDK21`。脚本把 Maven 用户目录、依赖仓库、构建临时文件和程序临时文件放在项目所在盘，不修改其他项目的全局 Maven 设置。项目移到别的电脑时，设置本机 `JAVA_HOME` 即可。
+以下命令均在项目根目录执行。通过本机环境变量 `JAVA_HOME` 选择 JDK 21；代码和脚本不绑定个人电脑的 JDK 安装位置。项目目录、缓存和产物采用相对路径，脚本以自身所在目录为基准解析。项目放在哪个盘，Maven 用户目录、依赖仓库和临时文件就保存在该项目目录下，不修改其他项目的全局 Maven 设置。
 
 IDEA 打开本目录的 `pom.xml`，选择 JDK 21。Maven 仓库通过 `.mvn/maven.config` 指向项目下的 `.cache/maven-repository`。如 IDEA 的 Maven 设置覆盖了项目设置，请把 Local repository 手工指向这个目录；Importer 和 Runner 同样选择 JDK 21。IDEA 自己的全局索引、插件和操作系统缓存不由本项目脚本管理。
 
@@ -71,7 +71,7 @@ Copy-Item -LiteralPath config\templates\client.properties -Destination config\lo
 从 KEPServerEX 配置管理器导出服务器公开证书，在服务器证书界面独立核对 SHA-256 指纹，再执行：
 
 ```powershell
-.\run.ps1 信任服务器 config\local\client.properties 'E:\path\server.der' '<SHA256>'
+.\run.ps1 信任服务器 config\local\client.properties 'config/local/server.der' '<SHA256>'
 ```
 
 将示例中的证书路径和 `<SHA256>` 替换为实际文件路径及核对过的 64 位十六进制指纹。程序会比较指纹，不符则拒绝导入。不要把发现服务返回的证书未经核对直接自动信任。
@@ -124,12 +124,14 @@ Copy-Item -LiteralPath config\templates\client.properties -Destination config\lo
 
 Git 根目录仅为本项目，不包含上级“裂解炉2”、安装包或甲方生产资料。公开仓库仅提交源码、模板和文档，不提交本机配置、用户名密码、证书私钥、Maven 缓存和构建产物。
 
-你在 GitHub 创建空的公开仓库后，将本地项目关联并推送：
+首次关联远程仓库并推送（只需执行一次）：
 
 ```powershell
 git remote add origin https://github.com/adasfand/UA-Java-Client.git
 git push -u origin main
 ```
+
+后续使用 `git pull --ff-only` 获取更新，提交后执行 `git push`。本机配置、PKI、IDE 设置、构建缓存、日志、诊断转储和临时文件由 `.gitignore` 排除；配置模板和 Maven Wrapper 保留在仓库中。
 
 个人仓库通过 Settings → Collaborators 邀请同学/开发者，对方接受后可以推送修改；公开可见本身不代表所有访客都能直接改仓库。建议各人创建功能分支，通过 Pull Request 合并。
 

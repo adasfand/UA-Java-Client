@@ -13,11 +13,8 @@ try {
         New-Item -ItemType Directory -Path (Join-Path $projectRoot $directory) -Force | Out-Null
     }
     $env:MAVEN_USER_HOME = Join-Path $projectRoot '.cache\maven-user'
-    if (-not $env:JAVA_HOME -and (Test-Path -LiteralPath 'E:\Java\JDK21\bin\java.exe')) {
-        $env:JAVA_HOME = 'E:\Java\JDK21'
-    }
     if (-not $env:JAVA_HOME -or -not (Test-Path -LiteralPath (Join-Path $env:JAVA_HOME 'bin\java.exe'))) {
-        throw '请将 JAVA_HOME 指向本机 JDK 21（例如 E:\Java\JDK21），不要指向 IDEA 自带运行时。'
+        throw '请通过本机环境变量 JAVA_HOME 指定有效的 JDK 21 目录。'
     }
     $tempDirectory = Join-Path $projectRoot '.cache\tmp'
     if ($Action -in @('构建', '测试')) {

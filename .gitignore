@@ -1,18 +1,46 @@
+# IDE 本机设置
 .idea/
 *.iml
+.vscode/
+.classpath
+.project
+.settings/
+
+# 构建产物与工具缓存
 target/
 out/
 .cache/
+*.class
+
+# 本机配置、凭据与 PKI
 config/local/
 pki/
-logs/
 *.p12
 *.pfx
+*.jks
+*.keystore
 *.key
 *.pem
 *.der
 *.cer
 .env
 .env.*
+!.env.example
+*.local.properties
+
+# 运行日志、诊断转储和编辑器临时文件
+logs/
 hs_err_pid*
+replay_pid*
+*.hprof
+*.jfr
 *.log
+*.tmp
+*.swp
+*.swo
+*~
+
+# 操作系统生成文件
+.DS_Store
+Thumbs.db
+Desktop.ini
