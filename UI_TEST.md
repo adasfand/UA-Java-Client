@@ -50,7 +50,7 @@ IDEA 打开项目并识别 `pom.xml` 后，在右上角运行配置下拉框中�
 
 以下保留首次部署时的证书修正过程。本机第二版服务器身份此前已生效；正常演示无需重新导入或重新初始化。
 
-当前服务端公开证书的副本位于被 Git 忽略的 `config/local/server.der`，已核对运行时指纹并导入本机客户端信任库。旧证书副本保存在 `pki/server-provisioning/server-original.der`。
+当前服务端公开证书的副本位于已共享的 `config/local/server.der`，不含私钥；此前已核对运行时指纹并导入本机客户端信任库。旧证书副本保存在被忽略的 `pki/server-provisioning/server-original.der`。
 
 初次读取的服务器证书仅含机器 DNS 名，没有 `127.0.0.1` IP SAN，并使用 SHA1 签名。Milo 离线预检已实际返回 `Bad_CertificateHostNameInvalid`，因此需要匹配连接地址的证书，不能据发现成功判断安全会话已通过。
 
@@ -66,7 +66,7 @@ IDEA 打开项目并识别 `pom.xml` 后，在右上角运行配置下拉框中�
 6. **模拟写入与回读**：只选择明确为静态模拟存储、允许写入的点，按 README 配置白名单、量程和显式确认。核对写状态和回读；不使用旧项目的阀门控制定时器。
 7. **异常行为**：核对取消密码、错误凭据、未受信证书和无写权限时的失败状态；不得自动降级或重放写入。
 
-“07 模拟写入42并回读”只读取被 Git 忽略的 `config/local/write-test.properties`，不会使用日常只读配置。此文件及其 `write-test-nodes.properties` 点表需要在核对静态模拟地址后单独准备：仅允许一个测试点，声明 simulation、回环端点、点位可写及数值范围。共享运行配置携带一次写入及显式确认参数；没有测试配置时直接失败。联调结束后关闭测试配置的写入开关，日常 `client.properties` 始终保持禁写。
+“07 模拟写入42并回读”只读取 `config/local/write-test.properties`，不会使用日常只读配置。该配置及其 `write-test-nodes.properties` 点表已作为本机模拟示例共享；迁移环境时先核对静态模拟地址，只允许明确列出的模拟点，声明 simulation、回环端点、点位可写及数值范围。共享运行配置携带一次写入及显式确认参数；没有测试配置时直接失败。联调结束后关闭测试配置的写入开关，日常 `client.properties` 始终保持禁写。
 
 注意 Simulator 的 `R` 寄存器会随读取递增，不能用于精确相等的静态回读验收；常量 `K` 寄存器支持读写。本机界面确认已有一个 K0001 / Word 测试点，UA 浏览确认 UInt16 标量及用户写权限，因此复用该点进行测试，不改动服务器工程。[地址行为](https://support.ptc.com/help/kepware/drivers/en/kepware/drivers/SIMULATOR/AddressDescriptions.html)、[16 位地址表](https://support.ptc.com/help/kepware/drivers/en/kepware/drivers/SIMULATOR/16_Bit_Device_Addresses.html)。
 

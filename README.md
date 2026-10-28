@@ -14,7 +14,7 @@
 src/main/java/cn/buct/ua/    Java 通信与命令行源码
 src/test/java/cn/buct/ua/    写入门禁、类型与配置测试
 config/templates/          可提交的配置模板，不含密码
-config/local/              各人自己的配置，不提交
+config/local/              已共享的本机模拟配置及服务器公开证书快照，不含密码
 pki/                       各人自己的证书和私钥，不提交
 .cache/                    Maven 依赖、发行包及临时文件，不提交
 target/                    构建产物，不提交
@@ -41,14 +41,16 @@ IDEA 打开本目录的 `pom.xml`，选择 JDK 21。Maven 仓库通过 `.mvn/mav
 
 跨平台可使用 JDK 21 和 Maven：`./mvnw verify`。Windows 也可直接执行 `mvnw.cmd verify`，但若要把 Maven 发行包与临时目录也留在项目盘，优先使用上面的 PowerShell 入口。
 
-## 2. 准备个人配置
+## 2. 准备连接配置
+
+仓库已包含 `config/local/` 的本机模拟示例：两个连接配置、两个点表和 `server.der` 公开证书快照。写入默认关闭。换电脑时，按自己的服务器地址、用户名和点位修改；客户端身份仍由各人在本机生成，密码在运行时输入。公开证书快照只对应本次演示服务器，不作为其他服务器的身份。
 
 ```powershell
-New-Item -ItemType Directory -Path config/local -Force
-Copy-Item -LiteralPath config\templates\client.properties -Destination config\local\client.properties
 .\run.ps1 检查配置
 .\run.ps1 发现
 ```
+
+需要独立个人配置时，可从模板复制为 `config/local/client.local.properties` 并在运行参数中指定；`*.local.properties` 被忽略。不要将口令加入已跟踪的配置文件。
 
 这些命令不需要业务账号密码，也不写业务点位。发现成功只代表服务器返回了端点，不代表认证会话和业务读写通过。
 
@@ -145,7 +147,7 @@ strict 模式下，将示例中的证书路径和 `<SHA256>` 替换为实际文�
 
 ## 协作与 GitHub
 
-Git 根目录仅为本项目，不包含上级“裂解炉2”、安装包或甲方生产资料。公开仓库仅提交源码、模板和文档，不提交本机配置、用户名密码、证书私钥、Maven 缓存和构建产物。
+Git 根目录仅为本项目，不包含上级“裂解炉2”、安装包或甲方生产资料。公开仓库提交源码、模板、文档及已审核的本机模拟配置，不提交密码、证书私钥、Maven 缓存和构建产物。
 
 首次关联远程仓库并推送（只需执行一次）：
 
@@ -154,7 +156,7 @@ git remote add origin https://github.com/adasfand/UA-Java-Client.git
 git push -u origin main
 ```
 
-后续使用 `git pull --ff-only` 获取更新，提交后执行 `git push`。本机配置、PKI、IDE 设置、构建缓存、日志、诊断转储和临时文件由 `.gitignore` 排除；配置模板和 Maven Wrapper 保留在仓库中。
+后续使用 `git pull --ff-only` 获取更新，提交后执行 `git push`。`.gitignore` 只允许 `config/local/` 中已审核的四份配置和一份公开证书；该目录其他个人文件、PKI、IDE 设置、构建缓存、日志、诊断转储和临时文件仍被排除。
 
 个人仓库通过 Settings → Collaborators 邀请同学/开发者，对方接受后可以推送修改；公开可见本身不代表所有访客都能直接改仓库。建议各人创建功能分支，通过 Pull Request 合并。
 

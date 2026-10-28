@@ -15,7 +15,7 @@
 | `UaServices.java` | 有期限的端点发现、逐页浏览、状态检查及 continuation point 清理 | 直接复用 Milo 的服务及传输 API |
 | `UaConnection.java` | 建立认证会话，浏览、读取、受控写入及关闭 | 将配置、PKI、点表和 Milo SDK 串起来 |
 
-`src/test/java` 是离线边界测试；`config/templates` 是公共模板；`config/local` 是各人本机配置；`pki` 保存各人的身份及信任；`pom.xml` 固定依赖并打包可运行 JAR。
+`src/test/java` 是离线边界测试；`config/templates` 是公共模板；`config/local` 共享不含口令的本机模拟配置；`pki` 保存各人的身份及信任，不进入仓库；`pom.xml` 固定依赖并打包可运行 JAR。
 
 ## 一次读取的调用顺序
 

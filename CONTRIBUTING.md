@@ -1,7 +1,7 @@
 # 协作约定
 
 1. 使用 Java 21，提交前执行 `run.ps1 构建` 或对应平台的 Maven Wrapper。
-2. 各自维护“config/local”和“pki”，不要互传私钥或提交口令。提交前查看 `git diff --cached`。
+2. `config/local` 共享本机模拟配置，不包含口令；需要私有参数时使用被忽略的 `*.local.properties`。各自维护 `pki`，不要互传私钥或提交口令。提交前查看 `git diff --cached`。
 3. 新功能在个人分支开发，Pull Request 说明修改目的和验证结果。
 4. 连接参数、点位、周期等放外部配置，不在 Java 代码中硬编码生产地址。
 5. 通信层与未来桌面 UI 分离，网络 IO 不放 UI 线程。
@@ -10,6 +10,6 @@
 8. 新增工艺逻辑前，必须确认权威点表、数据类型、量程、模式含义和动作顺序。代码能运行不等于工艺正确。
 9. PR 中区分单元测试、模拟服务器验证和生产联机验证，不混淆验收结论。
 10. 遵循仓库 `.editorconfig`：Java 使用 4 个空格缩进，XML 使用 2 个空格；Java 的 import、换行和排版统一采用 google-java-format 的 AOSP 风格。文件及目录使用英文名称，用户提示和必要注释使用中文。
-11. 共享 IDEA 运行配置保存在 `.run/`，使用英文文件名、中文显示名称和 `$PROJECT_DIR$` 工作目录。个人账号、点表、证书及缓存只放在被忽略的本机目录中。
+11. 共享 IDEA 运行配置保存在 `.run/`，使用英文文件名、中文显示名称和 `$PROJECT_DIR$` 工作目录。共享模拟点表可以提交；生产参数、口令、私钥及缓存保存在被忽略的本机文件或目录中。
 
 格式化工具说明：[google-java-format](https://github.com/google/google-java-format)。不要把格式化工具 JAR、Maven 缓存或构建产物提交到仓库。

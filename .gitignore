@@ -12,8 +12,14 @@ out/
 .cache/
 *.class
 
-# 本机配置、凭据与 PKI
-config/local/
+# 共享已审核的本机模拟配置；该目录内其他个人文件默认忽略
+config/local/*
+!config/local/client.properties
+!config/local/nodes.properties
+!config/local/write-test.properties
+!config/local/write-test-nodes.properties
+
+# 凭据与 PKI
 pki/
 *.p12
 *.pfx
@@ -23,6 +29,8 @@ pki/
 *.pem
 *.der
 *.cer
+# 本机演示服务器的公开证书快照，不含私钥
+!config/local/server.der
 .env
 .env.*
 !.env.example
