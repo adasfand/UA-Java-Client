@@ -1,4 +1,5 @@
 * text=auto
+.editorconfig text eol=lf
 mvnw text eol=lf
 *.config text eol=lf
 *.java text eol=lf

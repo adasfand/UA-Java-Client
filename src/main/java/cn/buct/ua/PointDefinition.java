@@ -1,25 +1,43 @@
 package cn.buct.ua;
 
-import java.math.BigDecimal;
-import java.util.Base64;
-import java.util.UUID;
 import org.eclipse.milo.opcua.stack.core.types.builtin.ByteString;
 import org.eclipse.milo.opcua.stack.core.types.builtin.NodeId;
 import org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.Unsigned;
 
+import java.math.BigDecimal;
+import java.util.Base64;
+import java.util.UUID;
+
 /** 按命名空间 URI 定位；保留 UA 原始类型，避免统一转换成 double。 */
-public record PointDefinition(String alias, String namespaceUri, String identifierType,
-        String identifier, String dataType, boolean writable, String minimum, String maximum) {
+public record PointDefinition(
+        String alias,
+        String namespaceUri,
+        String identifierType,
+        String identifier,
+        String dataType,
+        boolean writable,
+        String minimum,
+        String maximum) {
     public PointDefinition {
         switch (identifierType) {
             case "i" -> Unsigned.uint(identifier);
-            case "s" -> { if (identifier.isEmpty()) throw new IllegalArgumentException("字符串标识符不能为空"); }
-            case "g" -> { if (!UUID.fromString(identifier).toString().equalsIgnoreCase(identifier)) throw new IllegalArgumentException("GUID 格式不完整"); }
-            case "b" -> { if (Base64.getDecoder().decode(identifier).length == 0) throw new IllegalArgumentException("ByteString 标识符不能为空"); }
+            case "s" -> {
+                if (identifier.isEmpty()) throw new IllegalArgumentException("字符串标识符不能为空");
+            }
+            case "g" -> {
+                if (!UUID.fromString(identifier).toString().equalsIgnoreCase(identifier))
+                    throw new IllegalArgumentException("GUID 格式不完整");
+            }
+            case "b" -> {
+                if (Base64.getDecoder().decode(identifier).length == 0)
+                    throw new IllegalArgumentException("ByteString 标识符不能为空");
+            }
             default -> throw new IllegalArgumentException("点位标识符仅支持 i、s、g 或 b：" + alias);
         }
         if (writable && !dataType.equals("Boolean") && !dataType.equals("String")) {
-            if (minimum == null || maximum == null || new BigDecimal(minimum).compareTo(new BigDecimal(maximum)) > 0) {
+            if (minimum == null
+                    || maximum == null
+                    || new BigDecimal(minimum).compareTo(new BigDecimal(maximum)) > 0) {
                 throw new IllegalArgumentException("数值写入点必须配置有效 minimum/maximum：" + alias);
             }
         }
@@ -30,7 +48,9 @@ public record PointDefinition(String alias, String namespaceUri, String identifi
             case "i" -> new NodeId(namespaceIndex, Unsigned.uint(identifier));
             case "s" -> new NodeId(namespaceIndex, identifier);
             case "g" -> new NodeId(namespaceIndex, UUID.fromString(identifier));
-            case "b" -> new NodeId(namespaceIndex, ByteString.of(Base64.getDecoder().decode(identifier)));
+            case "b" ->
+                    new NodeId(
+                            namespaceIndex, ByteString.of(Base64.getDecoder().decode(identifier)));
             default -> throw new IllegalStateException("未验证的标识符类型");
         };
     }
@@ -44,7 +64,9 @@ public record PointDefinition(String alias, String namespaceUri, String identifi
         }
         if (dataType.equals("String")) return text;
         BigDecimal value = new BigDecimal(text);
-        if (minimum == null || maximum == null || value.compareTo(new BigDecimal(minimum)) < 0
+        if (minimum == null
+                || maximum == null
+                || value.compareTo(new BigDecimal(minimum)) < 0
                 || value.compareTo(new BigDecimal(maximum)) > 0) {
             throw new IllegalArgumentException("写入值超出点位配置范围：" + alias);
         }
@@ -79,7 +101,8 @@ public record PointDefinition(String alias, String namespaceUri, String identifi
 
     private void requireConvertedRange(BigDecimal requested, BigDecimal actual) {
         if ((requested.signum() != 0 && actual.signum() == 0)
-                || actual.compareTo(new BigDecimal(minimum)) < 0 || actual.compareTo(new BigDecimal(maximum)) > 0) {
+                || actual.compareTo(new BigDecimal(minimum)) < 0
+                || actual.compareTo(new BigDecimal(maximum)) > 0) {
             throw new IllegalArgumentException("浮点转换后的实际值下溢或超出范围，未写入：" + alias);
         }
     }

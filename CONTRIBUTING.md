@@ -9,3 +9,7 @@
 7. 读取失败、Bad/Uncertain 状态、超时和旧值必须显式处理，不能继续作为正常实时值控制设备。
 8. 新增工艺逻辑前，必须确认权威点表、数据类型、量程、模式含义和动作顺序。代码能运行不等于工艺正确。
 9. PR 中区分单元测试、模拟服务器验证和生产联机验证，不混淆验收结论。
+10. 遵循仓库 `.editorconfig`：Java 使用 4 个空格缩进，XML 使用 2 个空格；Java 的 import、换行和排版统一采用 google-java-format 的 AOSP 风格。文件及目录使用英文名称，用户提示和必要注释使用中文。
+11. 共享 IDEA 运行配置保存在 `.run/`，使用英文文件名、中文显示名称和 `$PROJECT_DIR$` 工作目录。个人账号、点表、证书及缓存只放在被忽略的本机目录中。
+
+格式化工具说明：[google-java-format](https://github.com/google/google-java-format)。不要把格式化工具 JAR、Maven 缓存或构建产物提交到仓库。
