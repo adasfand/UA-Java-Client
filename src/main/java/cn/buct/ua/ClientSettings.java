@@ -15,11 +15,12 @@ import org.eclipse.milo.opcua.stack.core.security.SecurityPolicy;
 import org.eclipse.milo.opcua.stack.core.types.enumerated.MessageSecurityMode;
 import org.eclipse.milo.opcua.stack.core.types.structured.EndpointDescription;
 
-/** 外部配置；不包含密码、私钥或自动信任策略。 */
+/** 外部配置；不包含密码或私钥。 */
 public record ClientSettings(URI endpoint, SecurityPolicy policy, MessageSecurityMode mode,
         String identityType, String username, String passwordEnv, String applicationUri,
         String applicationName, long timeoutMs, Path pkiDirectory, String pkiPasswordEnv,
-        Path nodesFile, boolean writesEnabled, String environment, URI discoveryEndpoint, PkiSettings pki) {
+        Path nodesFile, boolean writesEnabled, String environment, URI discoveryEndpoint, PkiSettings pki,
+        String serverTrust) {
 
     public ClientSettings {
         validateEndpoint(endpoint);
@@ -45,6 +46,19 @@ public record ClientSettings(URI endpoint, SecurityPolicy policy, MessageSecurit
         Objects.requireNonNull(pkiDirectory, "pki.directory");
         Objects.requireNonNull(nodesFile, "nodes.file");
         Objects.requireNonNull(pki, "pki");
+        if (!"strict".equals(serverTrust) && !"first-use".equals(serverTrust)) {
+            throw new IllegalArgumentException("security.serverTrust 仅支持 strict 或 first-use");
+        }
+    }
+
+    /** 原有构造入口保持人工预置信任的行为。 */
+    public ClientSettings(URI endpoint, SecurityPolicy policy, MessageSecurityMode mode,
+            String identityType, String username, String passwordEnv, String applicationUri,
+            String applicationName, long timeoutMs, Path pkiDirectory, String pkiPasswordEnv,
+            Path nodesFile, boolean writesEnabled, String environment, URI discoveryEndpoint, PkiSettings pki) {
+        this(endpoint, policy, mode, identityType, username, passwordEnv, applicationUri, applicationName,
+                timeoutMs, pkiDirectory, pkiPasswordEnv, nodesFile, writesEnabled, environment,
+                discoveryEndpoint, pki, "strict");
     }
 
     /** 保留原有构造入口；新增部署参数使用显式扩展构造或配置文件。 */
@@ -83,7 +97,8 @@ public record ClientSettings(URI endpoint, SecurityPolicy policy, MessageSecurit
                 p.getProperty("pki.passwordEnv", "UA_KEYSTORE_PASSWORD"),
                 absolute.getParent().resolve(required(p, "nodes.file")).normalize(),
                 bool(p, "writes.enabled", false), p.getProperty("environment", "simulation"),
-                discovery.isEmpty() ? endpoint : URI.create(discovery), PkiSettings.from(p, required(p, "application.name")));
+                discovery.isEmpty() ? endpoint : URI.create(discovery), PkiSettings.from(p, required(p, "application.name")),
+                p.getProperty("security.serverTrust", "strict").trim());
     }
 
     public List<PointDefinition> points() throws IOException {

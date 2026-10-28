@@ -51,8 +51,8 @@ public final class Main {
         NodeId browseRoot = args[0].equals("浏览") && args.length >= 3 ? NodeId.parse(args[2]) : new NodeId(0, 85);
         switch (args[0]) {
             case "检查配置" -> {
-                System.out.printf("配置有效：地址=%s | 策略=%s | 模式=%s | 身份=%s | 点位数=%d | 写入开关=%s%n",
-                        settings.endpoint(), settings.policy(), settings.mode(), settings.identityType(), settings.points().size(), settings.writesEnabled());
+                System.out.printf("配置有效：地址=%s | 策略=%s | 模式=%s | 身份=%s | 点位数=%d | 写入开关=%s | 服务器信任=%s%n",
+                        settings.endpoint(), settings.policy(), settings.mode(), settings.identityType(), settings.points().size(), settings.writesEnabled(), settings.serverTrust());
                 return 0;
             }
             case "发现" -> {

@@ -17,7 +17,6 @@ import org.eclipse.milo.opcua.stack.core.UaException;
 import org.eclipse.milo.opcua.sdk.client.identity.AnonymousProvider;
 import org.eclipse.milo.opcua.sdk.client.identity.IdentityProvider;
 import org.eclipse.milo.opcua.sdk.client.identity.UsernameProvider;
-import org.eclipse.milo.opcua.stack.core.security.DefaultClientCertificateValidator;
 import org.eclipse.milo.opcua.stack.core.security.FileBasedCertificateQuarantine;
 import org.eclipse.milo.opcua.stack.core.security.FileBasedTrustListManager;
 import org.eclipse.milo.opcua.stack.core.types.builtin.DataValue;
@@ -31,7 +30,6 @@ import org.eclipse.milo.opcua.stack.core.types.structured.WriteRequest;
 import org.eclipse.milo.opcua.stack.core.types.structured.WriteResponse;
 import org.eclipse.milo.opcua.stack.core.types.enumerated.TimestampsToReturn;
 import org.eclipse.milo.opcua.stack.core.types.enumerated.NodeClass;
-import org.eclipse.milo.opcua.stack.core.util.validation.ValidationCheck;
 import static org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.Unsigned.uint;
 
 /** 单次连接的生命周期。无定时控制、无自动重放写入。 */
@@ -57,7 +55,9 @@ public final class UaConnection implements AutoCloseable {
         try {
             var rejected = settings.pkiDirectory().resolve("rejected");
             Files.createDirectories(rejected);
-            var validator = new DefaultClientCertificateValidator(trust, ValidationCheck.ALL_OPTIONAL_CHECKS,
+            var endpoints = UaServices.discover(settings.discoveryEndpoint().toString(), settings.timeoutMs());
+            var selected = settings.selectEndpoint(endpoints);
+            var validator = ServerTrust.create(settings, selected, trust,
                     new FileBasedCertificateQuarantine(rejected.toFile()));
             IdentityProvider provider;
             if (settings.identityType().equals("username")) {
@@ -71,8 +71,6 @@ public final class UaConnection implements AutoCloseable {
                 }
                 finally { Arrays.fill(password, '\0'); }
             } else provider = new AnonymousProvider();
-            var endpoints = UaServices.discover(settings.discoveryEndpoint().toString(), settings.timeoutMs());
-            var selected = settings.selectEndpoint(endpoints);
             var configuration = OpcUaClientConfig.builder().setEndpoint(selected).setDiscoveryEndpoints(endpoints)
                             .setApplicationName(org.eclipse.milo.opcua.stack.core.types.builtin.LocalizedText.english(settings.applicationName()))
                             .setApplicationUri(settings.applicationUri())
