@@ -205,6 +205,156 @@ public final class UaConnection implements AutoCloseable {
         return point.nodeId(index.intValue());
     }
 
+    /** 为桌面节点树返回当前服务器的直接子节点，不读取变量值、不修改服务端。 */
+    public List<PointDiscovery.Node> browseNodes(NodeId parent, int referenceLimit)
+            throws Exception {
+        var result = new java.util.ArrayList<PointDiscovery.Node>();
+        for (var reference :
+                UaServices.browse(client, parent, settings.timeoutMs(), referenceLimit)) {
+            if (!reference.getNodeId().isLocal()) continue;
+            var local = reference.getNodeId().toNodeId(client.getNamespaceTable());
+            if (local.isEmpty()) continue;
+            NodeId id = local.get();
+            String uri = client.getNamespaceTable().get(id.getNamespaceIndex());
+            if (uri == null) throw new IllegalStateException("服务器没有提供节点的命名空间 URI");
+            String name =
+                    reference.getDisplayName() == null
+                            ? null
+                            : reference.getDisplayName().getText();
+            if (name == null || name.isBlank()) name = reference.getBrowseName().getName();
+            result.add(new PointDiscovery.Node(id, uri, name, reference.getNodeClass()));
+        }
+        return List.copyOf(result);
+    }
+
+    /** 节点身份使用 namespace URI，避免 namespace index 在服务器重启后变化。 */
+    public DiscoveredPoint describePoint(PointDiscovery.Node node) throws Exception {
+        var attributes = metadata(node.nodeId());
+        String type = builtInTypeName(attributes.dataType());
+        return new DiscoveredPoint(
+                node.name(),
+                node.namespaceUri(),
+                identifierType(node.nodeId()),
+                identifierText(node.nodeId()),
+                type,
+                attributes.valueRank(),
+                (attributes.access() & ACCESS_READ) != 0,
+                (attributes.access() & ACCESS_WRITE) != 0);
+    }
+
+    public PointDiscovery.Result discoverPoints(
+            PointDiscovery.Node root,
+            int maxDepth,
+            int maxReferences,
+            long timeoutMs,
+            java.util.function.BooleanSupplier cancelled)
+            throws Exception {
+        return PointDiscovery.scan(
+                new PointDiscovery.Source() {
+                    @Override
+                    public List<PointDiscovery.Node> children(NodeId parent) throws Exception {
+                        return browseNodes(parent, maxReferences);
+                    }
+
+                    @Override
+                    public DiscoveredPoint describe(PointDiscovery.Node node) throws Exception {
+                        return describePoint(node);
+                    }
+                },
+                root,
+                maxDepth,
+                maxReferences,
+                timeoutMs,
+                cancelled);
+    }
+
+    /** 只列出当前设备/标签组直接配置的标签，不递归扫描诊断及动态地址模板。 */
+    public PointDiscovery.Result discoverDeviceTags(
+            PointDiscovery.Node root,
+            int maxReferences,
+            long timeoutMs,
+            java.util.function.BooleanSupplier cancelled)
+            throws Exception {
+        var source =
+                new PointDiscovery.Source() {
+                    @Override
+                    public List<PointDiscovery.Node> children(NodeId parent) throws Exception {
+                        return browseNodes(parent, maxReferences);
+                    }
+
+                    @Override
+                    public DiscoveredPoint describe(PointDiscovery.Node node) throws Exception {
+                        return describePoint(node);
+                    }
+                };
+        return PointDiscovery.scan(
+                DeviceTagView.directTags(source), root, 2, maxReferences, timeoutMs, cancelled);
+    }
+
+    private String builtInTypeName(NodeId type) {
+        if (type.getNamespaceIndex().intValue() == 0
+                && type.getIdentifier()
+                        instanceof
+                        org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.UInteger id) {
+            String name =
+                    switch (id.intValue()) {
+                        case 1 -> "Boolean";
+                        case 2 -> "SByte";
+                        case 3 -> "Byte";
+                        case 4 -> "Int16";
+                        case 5 -> "UInt16";
+                        case 6 -> "Int32";
+                        case 7 -> "UInt32";
+                        case 8 -> "Int64";
+                        case 9 -> "UInt64";
+                        case 10 -> "Float";
+                        case 11 -> "Double";
+                        case 12 -> "String";
+                        case 13 -> "DateTime";
+                        case 14 -> "Guid";
+                        case 15 -> "ByteString";
+                        case 16 -> "XmlElement";
+                        case 17 -> "NodeId";
+                        case 18 -> "ExpandedNodeId";
+                        case 19 -> "StatusCode";
+                        case 20 -> "QualifiedName";
+                        case 21 -> "LocalizedText";
+                        case 22 -> "Structure";
+                        case 23 -> "DataValue";
+                        case 24 -> "BaseDataType";
+                        case 25 -> "DiagnosticInfo";
+                        case 26 -> "Number";
+                        case 27 -> "Integer";
+                        case 28 -> "UInteger";
+                        case 29 -> "Enumeration";
+                        default -> null;
+                    };
+            if (name != null) return name;
+        }
+        return "nsu="
+                + client.getNamespaceTable().get(type.getNamespaceIndex())
+                + ";"
+                + identifierType(type)
+                + "="
+                + identifierText(type);
+    }
+
+    private static String identifierType(NodeId id) {
+        return switch (id.getType()) {
+            case Numeric -> "i";
+            case String -> "s";
+            case Guid -> "g";
+            case Opaque -> "b";
+        };
+    }
+
+    private static String identifierText(NodeId id) {
+        return id.getIdentifier()
+                        instanceof org.eclipse.milo.opcua.stack.core.types.builtin.ByteString bytes
+                ? java.util.Base64.getEncoder().encodeToString(bytes.bytes())
+                : id.getIdentifier().toString();
+    }
+
     public void read(List<PointDefinition> points) throws Exception {
         List<ReadResult> results = readValues(points);
         boolean failed = false;

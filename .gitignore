@@ -44,6 +44,8 @@ replay_pid*
 *.jfr
 *.log
 *.tmp
+*.bak
+*.catalog.lock
 *.swp
 *.swo
 *~

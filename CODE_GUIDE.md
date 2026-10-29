@@ -1,8 +1,8 @@
 # 代码结构与适用边界
 
-本项目是 Java OPC UA 客户端通信层。当前使用 Java 21、Eclipse Milo 1.1.6，提供命令行和 IDEA 运行入口；后续桌面 UI 复用通信层。KEPServerEX 是服务器，Simulator 在服务器内部产生测试数据。
+本项目使用 Java 21、Eclipse Milo 1.1.6，提供命令行及 Swing 桌面连接入口，共用通信层。KEPServerEX 是服务器，Simulator 在服务器内部产生测试数据。
 
-## 八个源码文件怎样分工
+## 源码文件怎样分工
 
 | 文件 | 职责 | 与其他模块的关系 |
 | --- | --- | --- |
@@ -14,8 +14,30 @@
 | `PointDefinition.java` | 描述一个点，构造 NodeId，按 UA 类型解析写值并校验量程 | 点位别名与服务器真实地址之间的映射 |
 | `UaServices.java` | 有期限的端点发现、逐页浏览、状态检查及 continuation point 清理 | 直接复用 Milo 的服务及传输 API |
 | `UaConnection.java` | 建立认证会话，浏览、读取、受控写入及关闭 | 将配置、PKI、点表和 Milo SDK 串起来 |
+| `DesktopMain.java` | 桌面启动、加载配置及本机外观 | IDEA“服务器客户端”入口 |
+| `ServerWindow.java` | 服务器菜单、会话结果、断开及退出 | 持有认证会话，退出时释放资源 |
+| `ServerConnectDialog.java` | 端点列表、地址、用户名、查询和连接 | 后台调用 UaServices.discover / UaConnection |
+| `DesktopEndpoint.java` | 表单地址与所选端点转为一次连接配置 | 保留原 PKI，表单不写回磁盘，不开启写入 |
+| `DesktopCredentials.java` | 完整认证成功后缓存本次运行的凭据 | 隔离服务器、用户及私钥库；断开保留，清除/退出时清零 |
+| `PointBrowserDialog.java` | 设备树、扫描、勾选与保存的桌面入口 | 后台调用同一个已认证 UaConnection |
+| `PointDiscovery.java` | 有界遍历、循环去重、停止与不完整结果提示 | 复用 UaServices 浏览及 UaConnection 属性读取 |
+| `DeviceTagView.java` | 按设备显示直接标签，隐藏 KEP 内部节点 | 不修改通用浏览能力及其他厂商节点 |
+| `DiscoveredPoint.java` | 服务器变量元数据及稳定节点身份 | 以 namespace URI 标识，不依赖易变的 namespace index |
+| `PointCatalog.java` | 增量合并已选择点位、备份和原子保存 | 保留已有业务字段，检测外部修改，新点默认只读 |
 
 `src/test/java` 是离线边界测试；`config/templates` 是公共模板；`config/local` 共享不含口令的本机模拟配置；`pki` 保存各人的身份及信任，不进入仓库；`pom.xml` 固定依赖并打包可运行 JAR。
+
+## 桌面连接的调用顺序
+
+`DesktopMain.main` → `ClientSettings.load` → `ServerWindow` → “服务器 / 连接” → `ServerConnectDialog`。
+
+- “查询”：后台调用 `UaServices.discover`，将指定发现地址返回的端点显示到列表。
+- “连接”：`DesktopEndpoint.connection` 生成本次配置，`DesktopCredentials.begin` 开始凭据尝试，再由后台调用 `new UaConnection(settings, attempt)`；成功后提交本次缓存。原身份加载、端点匹配、证书校验与用户认证继续执行。
+- 成功后：主窗口持有 `UaConnection`，连接对话框关闭。只有构造函数完成认证后才显示成功。
+- “断开”：后台调用 `UaConnection.close`，凭据缓存保留；退出时清除缓存并调用 `Stack.releaseSharedResources`。表单操作不写回连接配置，不调用点位值读写函数。
+- “点位”：`browseNodes` 为设备树加载节点，`discoverPoints → PointDiscovery.scan → describePoint` 获取变量属性；`PointCatalog.save` 将勾选结果增量合并至配置指定点表。
+
+当前桌面范围是服务器连接、点位发现与选择保存；原有命令行读写能力继续保留。这里使用 Swing 和 Milo，不依赖原 C# DLL 或 Windows COM。具体国产系统及 CPU 架构尚未提供，跨系统运行尚待实机验证。
 
 ## 一次读取的调用顺序
 

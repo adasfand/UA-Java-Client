@@ -201,7 +201,7 @@ public record ClientSettings(
                             alias,
                             required(p, prefix + "namespaceUri"),
                             required(p, prefix + "identifierType"),
-                            required(p, prefix + "identifier"),
+                            rawIdentifier(p, prefix + "identifier"),
                             required(p, prefix + "dataType"),
                             bool(p, prefix + "writable", false),
                             p.getProperty(prefix + "minimum"),
@@ -284,6 +284,12 @@ public record ClientSettings(
     static String required(Properties p, String key) {
         String value = p.getProperty(key, "").trim();
         if (value.isEmpty()) throw new IllegalArgumentException("缺少配置：" + key);
+        return value;
+    }
+
+    private static String rawIdentifier(Properties p, String key) {
+        String value = p.getProperty(key);
+        if (value == null || value.isEmpty()) throw new IllegalArgumentException("缺少配置：" + key);
         return value;
     }
 

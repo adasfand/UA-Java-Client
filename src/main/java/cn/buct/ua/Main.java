@@ -6,11 +6,15 @@ import org.eclipse.milo.opcua.stack.core.types.builtin.NodeId;
 import java.nio.file.Path;
 import java.util.Arrays;
 
-/** 第一阶段命令行入口；桌面 UI 后续复用同一通信层。 */
+/** 命令行入口；“桌面”命令转交独立的桌面入口，其余操作保持单次执行。 */
 public final class Main {
     private Main() {}
 
     public static void main(String[] args) {
+        if (args.length > 0 && args[0].equals("桌面")) {
+            DesktopMain.main(Arrays.copyOfRange(args, 1, args.length));
+            return;
+        }
         int status;
         try {
             status = run(args);
@@ -44,9 +48,11 @@ public final class Main {
     static int run(String[] args) throws Exception {
         if (args.length == 0 || args[0].equals("帮助") || args[0].equals("--help")) {
             System.out.println(
-                    "用法：java -jar target/ua-java-client.jar 命令 config/local/client.properties [参数]");
+                    "用法：java -jar target/ua-java-client.jar 命令 config/local/client.properties"
+                            + " [参数]");
             System.out.println(
-                    "命令：检查配置、发现、初始化证书、信任服务器 证书路径 SHA256、浏览 [NodeId] [层数1—3]、读取 [别名]、写入 别名 值 --确认");
+                    "命令：桌面、检查配置、发现、初始化证书、信任服务器 证书路径 SHA256、浏览 [NodeId] [层数1—3]、读取 [别名]、写入 别名 值"
+                            + " --确认");
             return 0;
         }
         if (args.length < 2) throw new IllegalArgumentException("需要配置文件路径");
