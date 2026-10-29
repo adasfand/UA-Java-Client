@@ -15,6 +15,8 @@
 | `UaServices.java` | 有期限的端点发现、逐页浏览、状态检查及 continuation point 清理 | 直接复用 Milo 的服务及传输 API |
 | `UaConnection.java` | 建立认证会话，浏览、读取、受控写入及关闭 | 将配置、PKI、点表和 Milo SDK 串起来 |
 | `DesktopMain.java` | 桌面启动、加载配置及本机外观 | IDEA“服务器客户端”入口 |
+| `ClientConfigurationDialog.java` | 可视化编辑当前连接配置 | 服务器 → 连接配置 |
+| `ClientConfiguration.java` | 同一文件快照、参数校验、重复键清理、冲突检测、备份及原子保存 | 完整配置表和连接窗口共用 |
 | `ServerWindow.java` | 服务器菜单、会话结果、断开及退出 | 持有认证会话，退出时释放资源 |
 | `ServerConnectDialog.java` | 端点列表、地址、用户名、查询和连接 | 后台调用 UaServices.discover / UaConnection |
 | `DesktopEndpoint.java` | 表单地址与所选端点转为一次连接配置 | 保留原 PKI，表单不写回磁盘，不开启写入 |

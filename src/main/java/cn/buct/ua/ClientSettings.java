@@ -159,7 +159,12 @@ public record ClientSettings(
 
     public static ClientSettings load(Path file) throws IOException {
         Path absolute = file.toAbsolutePath().normalize();
-        Properties p = read(absolute);
+        return from(read(absolute), absolute);
+    }
+
+    /** 解析同一份配置快照；相对路径仍以实际配置文件目录为基准。 */
+    static ClientSettings from(Properties p, Path file) {
+        Path absolute = file.toAbsolutePath().normalize();
         URI endpoint = URI.create(required(p, "endpoint.url"));
         SecurityPolicy policy = SecurityPolicy.valueOf(required(p, "security.policy"));
         MessageSecurityMode mode = MessageSecurityMode.valueOf(required(p, "security.mode"));

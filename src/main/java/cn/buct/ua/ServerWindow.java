@@ -26,6 +26,7 @@ final class ServerWindow extends JFrame {
     private final JLabel server = new JLabel(" ");
     private final JMenuItem connect = new JMenuItem("连接…");
     private final JMenuItem disconnect = new JMenuItem("断开");
+    private final JMenuItem configuration = new JMenuItem("连接配置…");
     private final JMenuItem points = new JMenuItem("浏览并选择点位…");
     private final DesktopCredentials credentials = new DesktopCredentials(LocalPki::secret);
     private final Path configFile;
@@ -45,6 +46,7 @@ final class ServerWindow extends JFrame {
         var menu = new JMenu("服务器");
         menu.add(connect);
         menu.add(disconnect);
+        menu.add(configuration);
         menu.addSeparator();
         var forget = new JMenuItem("清除本次记住的凭据");
         menu.add(forget);
@@ -62,12 +64,12 @@ final class ServerWindow extends JFrame {
         information.add(status);
         information.add(server);
         add(information, BorderLayout.NORTH);
-        var configuration = new JLabel("配置：" + config);
-        configuration.setBorder(BorderFactory.createEmptyBorder(8, 24, 12, 24));
-        add(configuration, BorderLayout.SOUTH);
+        var configurationLabel = new JLabel("配置：" + config);
+        configurationLabel.setBorder(BorderFactory.createEmptyBorder(8, 24, 12, 24));
+        add(configurationLabel, BorderLayout.SOUTH);
         updateMenu();
-        connect.addActionListener(
-                e -> new ServerConnectDialog(this, lastSettings).setVisible(true));
+        connect.addActionListener(e -> openConnectionDialog());
+        configuration.addActionListener(e -> editConfiguration());
         disconnect.addActionListener(e -> disconnect(false));
         points.addActionListener(e -> browsePoints());
         forget.addActionListener(e -> credentials.clear());
@@ -79,6 +81,29 @@ final class ServerWindow extends JFrame {
                         disconnect(true);
                     }
                 });
+    }
+
+    private void openConnectionDialog() {
+        if (busy || connection != null) return;
+        try {
+            new ServerConnectDialog(this, configFile).setVisible(true);
+        } catch (Exception e) {
+            JOptionPane.showMessageDialog(this, failure(e), "配置提示", JOptionPane.WARNING_MESSAGE);
+        }
+    }
+
+    private void editConfiguration() {
+        if (busy || connection != null) return;
+        try {
+            new ClientConfigurationDialog(this, configFile, this::configurationSaved)
+                    .setVisible(true);
+        } catch (Exception e) {
+            JOptionPane.showMessageDialog(this, failure(e), "配置提示", JOptionPane.WARNING_MESSAGE);
+        }
+    }
+
+    void configurationSaved(ClientSettings settings) {
+        lastSettings = settings;
     }
 
     void connected(UaConnection connected, ClientSettings settings) {
@@ -126,6 +151,7 @@ final class ServerWindow extends JFrame {
     private void updateMenu() {
         connect.setEnabled(!busy && connection == null);
         disconnect.setEnabled(!busy && connection != null);
+        configuration.setEnabled(!busy && connection == null);
         points.setEnabled(!busy && connection != null);
     }
 

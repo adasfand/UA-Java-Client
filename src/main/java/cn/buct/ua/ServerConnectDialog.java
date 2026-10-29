@@ -11,7 +11,9 @@ import java.awt.Insets;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.net.URI;
+import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultListModel;
@@ -32,7 +34,9 @@ import javax.swing.event.DocumentListener;
 /** 仿照旧 C# 的服务器列表、地址及操作布局；查询与连接均在后台执行。 */
 final class ServerConnectDialog extends JDialog {
     private final ServerWindow owner;
-    private final ClientSettings defaults;
+    private ClientSettings defaults;
+    private final Path configFile;
+    private ClientConfiguration configuration;
     private final DefaultListModel<String> rows = new DefaultListModel<>();
     private final JList<String> servers = new JList<>(rows);
     private final JTextField address = new JTextField(28);
@@ -42,20 +46,24 @@ final class ServerConnectDialog extends JDialog {
     private final JButton query = new JButton("查询");
     private final JButton connect = new JButton("连接");
     private final JButton cancel = new JButton("取消");
+    private final JButton save = new JButton("保存配置");
+    private final JButton reload = new JButton("从文件重载");
     private List<EndpointDescription> endpoints = List.of();
     private URI discovery;
     private boolean busy;
     private boolean updating;
     private boolean hostEdited;
 
-    ServerConnectDialog(ServerWindow owner, ClientSettings defaults) {
+    ServerConnectDialog(ServerWindow owner, Path configFile) throws Exception {
         super(owner, "服务器连接", true);
         this.owner = owner;
-        this.defaults = defaults;
+        this.configFile = configFile;
+        configuration = new ClientConfiguration(configFile);
+        defaults = configuration.settings();
         discovery = defaults.discoveryEndpoint();
         setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
         setMinimumSize(new Dimension(630, 460));
-        setSize(700, 490);
+        setSize(760, 520);
         setLocationRelativeTo(owner);
         var content = new JPanel(new BorderLayout(0, 18));
         content.setBorder(BorderFactory.createEmptyBorder(14, 16, 14, 16));
@@ -73,8 +81,8 @@ final class ServerConnectDialog extends JDialog {
         addField(fields, "用户名", username, 2);
         bottom.add(fields, BorderLayout.NORTH);
         bottom.add(status, BorderLayout.CENTER);
-        var buttons = new JPanel(new FlowLayout(FlowLayout.CENTER, 44, 0));
-        for (JButton button : List.of(query, connect, cancel)) {
+        var buttons = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 0));
+        for (JButton button : List.of(query, save, reload, connect, cancel)) {
             button.setPreferredSize(new Dimension(108, 30));
             buttons.add(button);
         }
@@ -84,6 +92,7 @@ final class ServerConnectDialog extends JDialog {
         address.setToolTipText("完整的 opc.tcp 地址，包含主机、端口和可选路径");
         host.setToolTipText("修改这里可替换服务器地址中的主机，端口和路径保持不变");
         username.setText(defaults.username());
+        connect.setToolTipText("先保存当前地址、策略和用户名，再建立会话");
         username.setEnabled(defaults.identityType().equals("username"));
         address.setText(defaults.endpoint().toString());
         host.setText(defaults.endpoint().getHost());
@@ -128,6 +137,8 @@ final class ServerConnectDialog extends JDialog {
                 });
         query.addActionListener(e -> query());
         connect.addActionListener(e -> connect());
+        save.addActionListener(e -> saveConfiguration());
+        reload.addActionListener(e -> reloadConfiguration());
         cancel.addActionListener(e -> dispose());
         addWindowListener(
                 new WindowAdapter() {
@@ -178,7 +189,7 @@ final class ServerConnectDialog extends JDialog {
 
     private void setBusy(boolean value, String message) {
         busy = value;
-        for (var component : List.of(query, connect, cancel, servers, address, host))
+        for (var component : List.of(query, save, reload, connect, cancel, servers, address, host))
             component.setEnabled(!value);
         username.setEnabled(!value && defaults.identityType().equals("username"));
         status.setText(message);
@@ -228,22 +239,97 @@ final class ServerConnectDialog extends JDialog {
         }.execute();
     }
 
+    private ClientSettings enteredSettings() throws Exception {
+        URI url = target();
+        int index = servers.getSelectedIndex();
+        URI discoveryUrl =
+                index >= 0
+                        ? discovery
+                        : url.equals(defaults.endpoint()) ? defaults.discoveryEndpoint() : url;
+        return DesktopEndpoint.connection(
+                defaults,
+                url,
+                discoveryUrl,
+                index >= 0 ? endpoints.get(index) : null,
+                username.getText());
+    }
+
+    private ClientSettings persist(ClientSettings settings) throws Exception {
+        // 仅保存连接表单实际编辑的字段，保留原相对路径、其他参数及写入总开关。
+        ClientSettings stored =
+                configuration.save(
+                        Map.of(
+                                "endpoint.url", settings.endpoint().toString(),
+                                "endpoint.discoveryUrl", settings.discoveryEndpoint().toString(),
+                                "security.policy", settings.policy().name(),
+                                "security.mode", settings.mode().name(),
+                                "identity.username", settings.username()));
+        return stored;
+    }
+
+    private void reloadConfiguration() {
+        if (busy) return;
+        try {
+            ClientConfiguration loaded = new ClientConfiguration(configFile);
+            ClientSettings settings = loaded.settings();
+            configuration = loaded;
+            applySaved(settings);
+            status.setText("已从配置文件重载，当前用户名：" + settings.username());
+        } catch (Exception e) {
+            showFailure(e);
+        }
+    }
+
+    private void applySaved(ClientSettings settings) {
+        defaults = settings;
+        owner.configurationSaved(settings);
+        updating = true;
+        try {
+            address.setText(settings.endpoint().toString());
+            host.setText(settings.endpoint().getHost());
+            username.setText(settings.username());
+            username.setEnabled(settings.identityType().equals("username"));
+            hostEdited = false;
+            discovery = settings.discoveryEndpoint();
+            rows.clear();
+            endpoints = List.of();
+        } finally {
+            updating = false;
+        }
+    }
+
+    private void saveConfiguration() {
+        final ClientSettings entered;
+        try {
+            entered = enteredSettings();
+        } catch (Exception e) {
+            showFailure(e);
+            return;
+        }
+        setBusy(true, "正在保存连接配置…");
+        new SwingWorker<ClientSettings, Void>() {
+            @Override
+            protected ClientSettings doInBackground() throws Exception {
+                return persist(entered);
+            }
+
+            @Override
+            protected void done() {
+                setBusy(false, "未连接");
+                try {
+                    applySaved(get());
+                    status.setText("连接配置已保存；下次启动将自动回显。");
+                } catch (Exception e) {
+                    showFailure(e);
+                }
+            }
+        }.execute();
+    }
+
     private void connect() {
         final ClientSettings settings;
         try {
-            URI url = target();
-            int index = servers.getSelectedIndex();
-            URI discoveryUrl =
-                    index >= 0
-                            ? discovery
-                            : url.equals(defaults.endpoint()) ? defaults.discoveryEndpoint() : url;
-            settings =
-                    DesktopEndpoint.connection(
-                            defaults,
-                            url,
-                            discoveryUrl,
-                            index >= 0 ? endpoints.get(index) : null,
-                            username.getText());
+            settings = enteredSettings();
         } catch (Exception e) {
             showFailure(e);
             return;
@@ -252,6 +338,7 @@ final class ServerConnectDialog extends JDialog {
         new SwingWorker<UaConnection, Void>() {
             @Override
             protected UaConnection doInBackground() throws Exception {
+                persist(settings);
                 return owner.openConnection(settings);
             }
 
