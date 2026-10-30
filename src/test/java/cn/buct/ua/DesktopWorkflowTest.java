@@ -53,12 +53,13 @@ class DesktopWorkflowTest {
     }
 
     @Test
-    void firstLaunchCopiesBothTemplatesWithRelativePathsAndNoAutomaticIdentity() throws Exception {
+    void firstLaunchCopiesConnectionTemplateWithoutPointTableOrAutomaticIdentity()
+            throws Exception {
         Path config = directory.resolve("config/local/client.properties");
         DesktopFiles.prepare(config, Path.of("config/templates"));
         ClientSettings loaded = ClientSettings.load(config);
         assertEquals(config.getParent().resolve("nodes.properties"), loaded.nodesFile());
-        assertEquals(1, loaded.points().size());
+        assertFalse(Files.exists(loaded.nodesFile()));
         assertFalse(loaded.writesEnabled());
         assertFalse(Files.exists(loaded.pkiDirectory().resolve("client.p12")));
         assertArrayEquals(
@@ -77,24 +78,6 @@ class DesktopWorkflowTest {
         Files.writeString(config, "# 用户自建连接参数\n");
         DesktopFiles.prepare(config, Path.of("config/templates"));
         assertEquals("# 用户自建连接参数\n", Files.readString(config));
-    }
-
-    @Test
-    void dataTableCanBeCreatedBeforeAnyNetworkConnection() throws Exception {
-        Path config = directory.resolve("config/local/client.properties");
-        DesktopFiles.prepare(config, Path.of("config/templates"));
-        javax.swing.SwingUtilities.invokeAndWait(
-                () -> {
-                    var panel = new DataPanel(null, config);
-                    var table =
-                            (javax.swing.JTable)
-                                    ((javax.swing.JScrollPane) panel.getComponent(1))
-                                            .getViewport()
-                                            .getView();
-                    assertEquals(1, table.getRowCount());
-                    assertEquals("serverTime", table.getValueAt(0, 0));
-                    assertEquals("未读取", table.getValueAt(0, 3));
-                });
     }
 
     @Test

@@ -10,20 +10,22 @@ Copy-Item -LiteralPath $jar -Destination (Join-Path $stage 'app/ua-java-client.j
 foreach ($script in 'start-client.cmd','start-client.sh') {
     Copy-Item -LiteralPath (Join-Path $projectRoot $script) -Destination (Join-Path $stage $script)
 }
-foreach ($name in 'client.properties','nodes.properties') {
+foreach ($name in 'client.properties') {
     Copy-Item -LiteralPath (Join-Path $projectRoot ('config/templates/' + $name)) -Destination (Join-Path $stage ('config/templates/' + $name))
 }
 @'
-OPC UA 第一部分桌面演示包
+OPC UA 连接、读、写客户端
 
 运行环境：JDK 21 和图形桌面。Windows 双击 start-client.cmd；Linux 在图形会话中运行 sh start-client.sh。
-首次启动按提示创建本机配置，在“服务器 → 连接配置”填写实际地址、策略和用户名。
-通过“证书”菜单初始化身份，将 client.der 导入 KEP 的受信任客户端后连接。
-在点位窗口选择设备和标签保存；主窗口支持读取、点位写授权和范围设置、一次写入并回读。
-模拟写入目前仅开放本机回环端点；演示结束关闭写入总开关及点位写授权。
+首次启动自动创建本机连接配置，在主窗口输入服务器地址/IP、必要账号和口令，点击连接。
+安全策略、应用URI、证书路径与信任方式在 config/local/client.properties 中部署配置，不显示配置管理页面。
+缺少身份时首次连接会生成客户端证书；请将 client.der 交服务器信任后再次连接。已有身份直接复用。
+连接后输入现场提供的完整UA NodeId，点击读取；写入填写目标NodeId及数值，点击写入。
+写入成功表示服务器接受写服务，不自动回读、重试或回滚；可另用读取按钮核对。
 参数统一保存在 config/local；pki 为本机生成的身份材料，不随演示包分发。
-本包不包含持续采集、Excel、历史曲线或工艺控制；国产系统现场兼容性仍需在目标系统验收。
+函数调用与参数说明见 API_GUIDE.md。现场和国产系统兼容性仍需实际验收。
 '@ | Set-Content -LiteralPath (Join-Path $stage 'README.txt') -Encoding UTF8
+Copy-Item -LiteralPath (Join-Path $projectRoot 'API_GUIDE.md') -Destination (Join-Path $stage 'API_GUIDE.md')
 $distRoot = Join-Path $projectRoot 'dist'
 New-Item -ItemType Directory -Path $distRoot -Force | Out-Null
 $archive = Join-Path $distRoot 'ua-java-client.zip'

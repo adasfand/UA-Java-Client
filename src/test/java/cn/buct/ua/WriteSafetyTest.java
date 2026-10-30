@@ -6,8 +6,11 @@ import org.eclipse.milo.opcua.stack.core.security.SecurityPolicy;
 import org.eclipse.milo.opcua.stack.core.types.enumerated.MessageSecurityMode;
 import org.junit.jupiter.api.Test;
 
+import java.net.InetAddress;
+import java.net.NetworkInterface;
 import java.net.URI;
 import java.nio.file.Path;
+import java.util.Set;
 
 class WriteSafetyTest {
     private ClientSettings settings(boolean enabled, String host, String environment) {
@@ -69,6 +72,67 @@ class WriteSafetyTest {
         assertThrows(
                 IllegalArgumentException.class,
                 () -> settings(true, "localhost", "simulation").requireWrite(p, true));
+    }
+
+    @Test
+    void computerNameResolvingToAssignedAddressIsLocal() throws Exception {
+        var address = InetAddress.getByAddress("test-workstation", new byte[] {10, 1, 2, 3});
+        assertTrue(ClientSettings.areLocalAddresses(new InetAddress[] {address}, Set.of(address)));
+        var sameAddress = InetAddress.getByAddress("another-name", new byte[] {10, 1, 2, 3});
+        assertTrue(
+                ClientSettings.areLocalAddresses(new InetAddress[] {sameAddress}, Set.of(address)));
+    }
+
+    @Test
+    void privateRemoteOrMixedLocalAndRemoteAddressesAreRejected() throws Exception {
+        var local = InetAddress.getByAddress(new byte[] {10, 1, 2, 3});
+        var remote = InetAddress.getByAddress(new byte[] {10, 1, 2, 4});
+        assertFalse(ClientSettings.areLocalAddresses(new InetAddress[] {remote}, Set.of(local)));
+        assertFalse(
+                ClientSettings.areLocalAddresses(new InetAddress[] {local, remote}, Set.of(local)));
+        assertFalse(ClientSettings.areLocalAddresses(new InetAddress[0], Set.of(local)));
+    }
+
+    @Test
+    void wildcardAndMulticastAreNotServerIdentityAddresses() throws Exception {
+        var wildcard = InetAddress.getByName("0.0.0.0");
+        var multicast = InetAddress.getByName("224.0.0.1");
+        assertFalse(
+                ClientSettings.areLocalAddresses(new InetAddress[] {wildcard}, Set.of(wildcard)));
+        assertFalse(
+                ClientSettings.areLocalAddresses(new InetAddress[] {multicast}, Set.of(multicast)));
+        assertTrue(ClientSettings.isLocalHost("localhost"));
+        assertTrue(ClientSettings.isLocalHost("127.0.0.1"));
+        assertTrue(ClientSettings.isLocalHost("[::1]"));
+    }
+
+    @Test
+    void actualAssignedAddressesPassWriteGateWithoutChangingEndpoint() throws Exception {
+        var interfaces = NetworkInterface.getNetworkInterfaces();
+        assertNotNull(interfaces);
+        int checked = 0;
+        while (interfaces.hasMoreElements()) {
+            var addresses = interfaces.nextElement().getInetAddresses();
+            while (addresses.hasMoreElements()) {
+                var address = addresses.nextElement();
+                if (address.isAnyLocalAddress() || address.isMulticastAddress()) continue;
+                String host = address.getHostAddress();
+                if (address.getAddress().length == 16) host = "[" + host + "]";
+                var config = settings(true, host, "simulation");
+                assertDoesNotThrow(() -> config.requireWrite(point(true), true), host);
+                assertEquals(host, config.endpoint().getHost());
+                checked++;
+            }
+        }
+        assertTrue(checked > 0);
+    }
+
+    @Test
+    void actualComputerNamePassesWriteGateWithoutReplacingItWithLoopback() throws Exception {
+        String host = InetAddress.getLocalHost().getHostName();
+        var config = settings(true, host, "simulation");
+        assertDoesNotThrow(() -> config.requireWrite(point(true), true));
+        assertEquals(host, config.endpoint().getHost());
     }
 
     @Test

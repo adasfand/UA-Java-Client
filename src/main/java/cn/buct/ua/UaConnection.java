@@ -392,6 +392,36 @@ public final class UaConnection implements AutoCloseable {
         return List.copyOf(results);
     }
 
+    /** 按现场提供的UA地址读取Value，不要求nodes.properties条目或浏览保存。 */
+    public DataValue readAddress(String address) throws Exception {
+        requireOpen();
+        NodeId id = UaAddress.resolve(address, client.getNamespaceTable());
+        var results =
+                client.readValuesAsync(0.0, TimestampsToReturn.Both, List.of(id))
+                        .get(settings.timeoutMs(), TimeUnit.MILLISECONDS);
+        if (results == null || results.size() != 1 || results.getFirst() == null)
+            throw new IllegalStateException("读取返回数量或内容异常");
+        return results.getFirst();
+    }
+
+    /** 通用地址写入：按服务器类型转换，只写一次；不强制读取写Only点或回读动态点。 */
+    public org.eclipse.milo.opcua.stack.core.types.builtin.StatusCode writeAddress(
+            String address, Object value) throws Exception {
+        requireOpen();
+        NodeId id = UaAddress.resolve(address, client.getNamespaceTable());
+        VariableMetadata attributes = metadata(id);
+        if (attributes.valueRank() != SCALAR_VALUE_RANK)
+            throw new IllegalArgumentException("当前写接口支持int/float等基本标量，不支持数组或结构体");
+        if ((attributes.access() & ACCESS_WRITE) == 0)
+            throw new IllegalArgumentException("当前服务器账号没有该地址的写权限");
+        Object typed = ScalarValue.convert(attributes.dataType(), value);
+        return writeOnce(id, typed);
+    }
+
+    private void requireOpen() {
+        if (isClosed() || client == null) throw new IllegalStateException("连接已关闭，请重新连接");
+    }
+
     private VariableMetadata metadata(NodeId id) throws Exception {
         var attributes =
                 List.of(AttributeId.DataType, AttributeId.ValueRank, AttributeId.UserAccessLevel);
@@ -475,7 +505,28 @@ public final class UaConnection implements AutoCloseable {
                         .getFirst();
         if (before.getStatusCode() == null || !before.getStatusCode().isGood())
             throw new IllegalStateException("写前读取质量异常，未写入");
-        // 只使用当前已激活会话；不等待新会话。传输等待阶段可通过原始 future 取消。
+        var writeStatus = writeOnce(id, typed);
+        DataValue after;
+        try {
+            after =
+                    client.readValuesAsync(0.0, TimestampsToReturn.Both, List.of(id))
+                            .get(settings.timeoutMs(), TimeUnit.MILLISECONDS)
+                            .getFirst();
+        } catch (Exception e) {
+            throw new IllegalStateException("写服务已返回 Good，但回读未完成，当前值未确认；不自动重试或回滚", e);
+        }
+        if (after.getStatusCode() == null
+                || !after.getStatusCode().isGood()
+                || !Objects.equals(typed, after.getValue().getValue())) {
+            throw new IllegalStateException("写服务已接受，但读回未确认匹配；不重试、不自动回滚");
+        }
+        return new WriteResult(point.alias(), id, before, typed, writeStatus, after);
+    }
+
+    private org.eclipse.milo.opcua.stack.core.types.builtin.StatusCode writeOnce(
+            NodeId id, Object typed) throws Exception {
+        requireOpen();
+        // 只使用当前已激活会话；不等待新会话。不在超时后自动重放写入。
         var session = client.getSessionAsync().getNow(null);
         if (session == null) throw new IllegalStateException("当前没有已激活会话，未提交写入");
         var request =
@@ -502,28 +553,22 @@ public final class UaConnection implements AutoCloseable {
             }
             throw new IllegalStateException("写请求未得到确认，结果可能未知；已请求断开，不自动重试", e);
         }
+        return checkedWriteStatus(response);
+    }
+
+    static org.eclipse.milo.opcua.stack.core.types.builtin.StatusCode checkedWriteStatus(
+            WriteResponse response) throws UaException {
+        if (response == null
+                || response.getResponseHeader() == null
+                || response.getResponseHeader().getServiceResult() == null)
+            throw new IllegalStateException("写服务缺少响应状态，结果未确认");
+        var service = response.getResponseHeader().getServiceResult();
+        if (!service.isGood()) throw new UaException(service);
         var statuses = response.getResults();
-        if (statuses == null
-                || statuses.length != 1
-                || statuses[0] == null
-                || !statuses[0].isGood()) {
-            throw new IllegalStateException("写入返回失败：" + Arrays.toString(statuses));
-        }
-        DataValue after;
-        try {
-            after =
-                    client.readValuesAsync(0.0, TimestampsToReturn.Both, List.of(id))
-                            .get(settings.timeoutMs(), TimeUnit.MILLISECONDS)
-                            .getFirst();
-        } catch (Exception e) {
-            throw new IllegalStateException("写服务已返回 Good，但回读未完成，当前值未确认；不自动重试或回滚", e);
-        }
-        if (after.getStatusCode() == null
-                || !after.getStatusCode().isGood()
-                || !Objects.equals(typed, after.getValue().getValue())) {
-            throw new IllegalStateException("写服务已接受，但读回未确认匹配；不重试、不自动回滚");
-        }
-        return new WriteResult(point.alias(), id, before, typed, statuses[0], after);
+        if (statuses == null || statuses.length != 1 || statuses[0] == null)
+            throw new IllegalStateException("写服务返回点数或状态异常，结果未确认");
+        if (!statuses[0].isGood()) throw new UaException(statuses[0]);
+        return statuses[0];
     }
 
     @Override

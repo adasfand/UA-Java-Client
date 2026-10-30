@@ -13,7 +13,6 @@ final class DesktopFiles {
         if (Files.exists(configFile)) return;
         Path parent = configFile.toAbsolutePath().normalize().getParent();
         Files.createDirectories(parent);
-        copyIfMissing(templates.resolve("nodes.properties"), parent.resolve("nodes.properties"));
         copyIfMissing(templates.resolve("client.properties"), configFile);
     }
 

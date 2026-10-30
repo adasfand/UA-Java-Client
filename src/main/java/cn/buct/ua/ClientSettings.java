@@ -6,6 +6,8 @@ import org.eclipse.milo.opcua.stack.core.types.structured.EndpointDescription;
 
 import java.io.IOException;
 import java.io.Reader;
+import java.net.InetAddress;
+import java.net.NetworkInterface;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -15,6 +17,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Properties;
+import java.util.Set;
 
 /** 外部配置；不包含密码或私钥。 */
 public record ClientSettings(
@@ -184,7 +187,9 @@ public record ClientSettings(
                 timeout,
                 absolute.getParent().resolve(required(p, "pki.directory")).normalize(),
                 p.getProperty("pki.passwordEnv", "UA_KEYSTORE_PASSWORD"),
-                absolute.getParent().resolve(required(p, "nodes.file")).normalize(),
+                absolute.getParent()
+                        .resolve(p.getProperty("nodes.file", "nodes.properties"))
+                        .normalize(),
                 bool(p, "writes.enabled", false),
                 p.getProperty("environment", "simulation"),
                 discovery.isEmpty() ? endpoint : URI.create(discovery),
@@ -242,20 +247,52 @@ public record ClientSettings(
     }
 
     public void requireWrite(PointDefinition point, boolean confirmed) {
-        if (!writesEnabled || !confirmed || !point.writable()) {
-            throw new IllegalArgumentException("写入被拒绝：需要总开关、点位 writable=true 和 --确认 参数");
+        requireWriteConfiguration(point, confirmed);
+        if (!isLocalHost(endpoint.getHost())) {
+            throw new IllegalArgumentException(
+                    "模拟写入仅支持本机服务器；地址 " + endpoint.getHost() + " 未能确认为本机地址");
         }
-        String host = endpoint.getHost();
-        if (!environment.equals("simulation")
-                || !(host.equals("127.0.0.1")
-                        || host.equalsIgnoreCase("localhost")
-                        || host.equals("[::1]")
-                        || host.equals("::1"))) {
-            throw new IllegalArgumentException("首版写入仅支持明确标记 simulation 的本机回环端点");
+    }
+
+    /** 不进行地址解析，供桌面线程在显示确认框前检查本地参数。 */
+    void requireWriteConfiguration(PointDefinition point, boolean confirmed) {
+        if (!writesEnabled || !confirmed || !point.writable()) {
+            throw new IllegalArgumentException("写入被拒绝：需要打开总开关、允许点位写入并确认本次操作");
+        }
+        if (!environment.equals("simulation")) {
+            throw new IllegalArgumentException("模拟写入需要在连接配置中设置 environment=simulation");
         }
         if (point.namespaceUri().equals("http://opcfoundation.org/UA/")) {
             throw new IllegalArgumentException("首版不允许写入标准命名空间节点");
         }
+    }
+
+    /** 电脑名必须解析到当前系统实际拥有的地址，不凭名称相似或同网段认定本机。 */
+    static boolean isLocalHost(String host) {
+        try {
+            InetAddress[] resolved = InetAddress.getAllByName(host);
+            var assigned = new HashSet<InetAddress>();
+            var interfaces = NetworkInterface.getNetworkInterfaces();
+            if (interfaces != null) {
+                while (interfaces.hasMoreElements()) {
+                    var addresses = interfaces.nextElement().getInetAddresses();
+                    while (addresses.hasMoreElements()) assigned.add(addresses.nextElement());
+                }
+            }
+            return areLocalAddresses(resolved, assigned);
+        } catch (IOException | SecurityException e) {
+            return false;
+        }
+    }
+
+    static boolean areLocalAddresses(InetAddress[] resolved, Set<InetAddress> assigned) {
+        if (resolved.length == 0) return false;
+        for (InetAddress address : resolved) {
+            if (address.isAnyLocalAddress()
+                    || address.isMulticastAddress()
+                    || !(address.isLoopbackAddress() || assigned.contains(address))) return false;
+        }
+        return true;
     }
 
     public boolean acceptsEndpoint(String candidate) {
