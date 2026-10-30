@@ -56,6 +56,41 @@ class PointCatalogTest {
     }
 
     @Test
+    void configuringWritePermissionPreservesIdentityCustomFieldsAndOriginalBackup()
+            throws Exception {
+        Files.writeString(file, existing());
+        byte[] original = Files.readAllBytes(file);
+        var catalog = new PointCatalog(file);
+        var configured = catalog.configure("Temperature", false, "5", "90");
+        assertFalse(configured.writable());
+        assertEquals("old-temperature", configured.identifier());
+        assertEquals("5", configured.minimum());
+        assertEquals("90", new PointCatalog(file).existingPoints().getFirst().maximum());
+        assertTrue(Files.readString(file).contains("node.Temperature.custom=保留此值"));
+        try (var files = Files.list(directory)) {
+            Path backup =
+                    files.filter(p -> p.getFileName().toString().startsWith("catalog-backup-"))
+                            .findFirst()
+                            .orElseThrow();
+            assertArrayEquals(original, Files.readAllBytes(backup));
+        }
+    }
+
+    @Test
+    void pointSettingsRejectInvalidRangeAndConcurrentFileChanges() throws Exception {
+        Files.writeString(file, existing());
+        var catalog = new PointCatalog(file);
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> catalog.configure("Temperature", true, "100", "0"));
+        assertEquals(existing(), Files.readString(file));
+        Files.writeString(file, existing() + "# 外部修改\n");
+        String external = Files.readString(file);
+        assertThrows(IOException.class, () -> catalog.configure("Temperature", false, "0", "100"));
+        assertEquals(external, Files.readString(file));
+    }
+
+    @Test
     void mergesOnlyNewNodesPreservingBusinessFieldsAndExactBackup() throws Exception {
         Files.writeString(file, existing());
         byte[] before = Files.readAllBytes(file);

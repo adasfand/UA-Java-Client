@@ -51,6 +51,10 @@ public final class UaConnection implements AutoCloseable {
 
     public record ReadResult(String alias, NodeId nodeId, DataValue value) {}
 
+    synchronized boolean isClosed() {
+        return closed;
+    }
+
     private record VariableMetadata(NodeId dataType, int valueRank, int access) {}
 
     public UaConnection(ClientSettings settings) throws Exception {
@@ -375,6 +379,7 @@ public final class UaConnection implements AutoCloseable {
 
     /** 返回原始类型、质量和时间戳，供桌面界面处理；非 Good 状态也保留在结果中。 */
     public List<ReadResult> readValues(List<PointDefinition> points) throws Exception {
+        if (points.isEmpty()) return List.of();
         List<NodeId> ids = points.stream().map(this::resolve).toList();
         List<DataValue> values =
                 client.readValuesAsync(0.0, TimestampsToReturn.Both, ids)
@@ -410,8 +415,34 @@ public final class UaConnection implements AutoCloseable {
                 ((UByte) values[2].getValue().getValue()).intValue());
     }
 
+    public record WriteResult(
+            String alias,
+            NodeId nodeId,
+            DataValue before,
+            Object requested,
+            org.eclipse.milo.opcua.stack.core.types.builtin.StatusCode status,
+            DataValue after) {}
+
     public void write(PointDefinition point, String text, boolean confirmed) throws Exception {
-        settings.requireWrite(point, confirmed);
+        WriteResult result = writeValue(point, text, confirmed, settings);
+        System.out.printf(
+                "模拟写入：点位=%s | 旧值=%s | 请求值=%s | 写状态=%s | 读回=%s | 读回状态=%s%n",
+                result.alias(),
+                result.before().getValue(),
+                result.requested(),
+                result.status(),
+                result.after().getValue(),
+                result.after().getStatusCode());
+    }
+
+    /** 同一已认证会话写一次并回读；UI 从同一配置文件取得最新写授权。 */
+    public WriteResult writeValue(
+            PointDefinition point, String text, boolean confirmed, ClientSettings authorization)
+            throws Exception {
+        authorization.requireSameConnection(settings);
+        if (!point.equals(authorization.point(point.alias())))
+            throw new IllegalArgumentException("点位配置已改变，请重载点表后再写入");
+        authorization.requireWrite(point, confirmed);
         Object typed = point.parseWriteValue(text);
         NodeId id = resolve(point);
         var metadata = metadata(id);
@@ -487,19 +518,12 @@ public final class UaConnection implements AutoCloseable {
         } catch (Exception e) {
             throw new IllegalStateException("写服务已返回 Good，但回读未完成，当前值未确认；不自动重试或回滚", e);
         }
-        System.out.printf(
-                "模拟写入：点位=%s | 旧值=%s | 请求值=%s | 写状态=%s | 读回=%s | 读回状态=%s%n",
-                point.alias(),
-                before.getValue(),
-                typed,
-                statuses[0],
-                after.getValue(),
-                after.getStatusCode());
         if (after.getStatusCode() == null
                 || !after.getStatusCode().isGood()
                 || !Objects.equals(typed, after.getValue().getValue())) {
             throw new IllegalStateException("写服务已接受，但读回未确认匹配；不重试、不自动回滚");
         }
+        return new WriteResult(point.alias(), id, before, typed, statuses[0], after);
     }
 
     @Override

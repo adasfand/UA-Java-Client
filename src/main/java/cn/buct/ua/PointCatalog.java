@@ -14,6 +14,7 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.util.UUID;
@@ -46,13 +47,61 @@ public final class PointCatalog {
         if (selected == null || selected.isEmpty()) {
             throw new IllegalArgumentException("请至少选择一个变量");
         }
+        return locked(() -> saveLocked(List.copyOf(selected)));
+    }
+
+    /** 只编辑已有点的应用写授权和范围，不改服务器标识、类型或自定义属性。 */
+    public synchronized PointDefinition configure(
+            String alias, boolean writable, String minimum, String maximum) throws Exception {
+        PointDefinition point =
+                existing.stream()
+                        .filter(p -> p.alias().equals(alias))
+                        .findFirst()
+                        .orElseThrow(() -> new IllegalArgumentException("点位已不存在，请重载点表"));
+        String min = minimum == null ? "" : minimum.trim();
+        String max = maximum == null ? "" : maximum.trim();
+        if (!min.isEmpty() || !max.isEmpty()) {
+            if (min.isEmpty()
+                    || max.isEmpty()
+                    || new java.math.BigDecimal(min).compareTo(new java.math.BigDecimal(max)) > 0)
+                throw new IllegalArgumentException("请填写有效的最小值和最大值");
+        }
+        var updated =
+                new PointDefinition(
+                        point.alias(),
+                        point.namespaceUri(),
+                        point.identifierType(),
+                        point.identifier(),
+                        point.dataType(),
+                        writable,
+                        min.isEmpty() ? null : min,
+                        max.isEmpty() ? null : max);
+        return locked(
+                () -> {
+                    verifySnapshot();
+                    String prefix = "node." + alias + ".";
+                    replace(
+                            ClientConfiguration.merge(
+                                    original,
+                                    Map.of(
+                                            prefix + "writable",
+                                            Boolean.toString(writable),
+                                            prefix + "minimum",
+                                            min,
+                                            prefix + "maximum",
+                                            max)));
+                    return updated;
+                });
+    }
+
+    private <T> T locked(java.util.concurrent.Callable<T> task) throws Exception {
         Files.createDirectories(file.getParent());
         Path lockFile = file.resolveSibling(file.getFileName() + ".catalog.lock");
         try (var channel =
                 FileChannel.open(lockFile, StandardOpenOption.CREATE, StandardOpenOption.WRITE)) {
             try (var lock = channel.tryLock()) {
                 if (lock == null) throw new IOException("点表正由其他窗口保存，请稍后重试");
-                return saveLocked(List.copyOf(selected));
+                return task.call();
             } catch (OverlappingFileLockException e) {
                 throw new IOException("点表正由其他窗口保存，请稍后重试", e);
             }
@@ -116,6 +165,11 @@ public final class PointCatalog {
             result.append('\n');
         }
         String output = result.toString().stripTrailing() + "\n";
+        replace(output);
+        return new SaveResult(additions.size(), duplicateCount, file);
+    }
+
+    private void replace(String output) throws Exception {
         Properties validated = parseProperties(output);
         List<PointDefinition> checked = parsePoints(validated);
         byte[] bytes = output.getBytes(StandardCharsets.UTF_8);
@@ -142,7 +196,6 @@ public final class PointCatalog {
         } finally {
             Files.deleteIfExists(temporary);
         }
-        return new SaveResult(additions.size(), duplicateCount, file);
     }
 
     private void verifySnapshot() throws IOException {

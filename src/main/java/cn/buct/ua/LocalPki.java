@@ -182,6 +182,13 @@ public final class LocalPki {
         return password;
     }
 
+    /** 桌面入口始终使用图形密码框，即使程序从带终端的 java 命令启动。 */
+    public static char[] graphicalSecret(String environmentName, String prompt) {
+        String value = System.getenv(environmentName);
+        if (value != null && !value.isEmpty()) return value.toCharArray();
+        return desktopSecret(prompt, environmentName);
+    }
+
     /** IDEA 控制台不支持 Console.readPassword 时，由操作者在本机窗口隐藏输入。 */
     private static char[] desktopSecret(String prompt, String environmentName) {
         if (GraphicsEnvironment.isHeadless()) {

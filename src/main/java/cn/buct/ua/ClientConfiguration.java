@@ -139,7 +139,7 @@ public final class ClientConfiguration {
         }
     }
 
-    private static String merge(String text, Map<String, String> changes) throws IOException {
+    static String merge(String text, Map<String, String> changes) throws IOException {
         String newline = text.contains("\r\n") ? "\r\n" : text.contains("\r") ? "\r" : "\n";
         var result = new StringBuilder();
         var updated = new HashSet<String>();

@@ -222,6 +222,25 @@ public record ClientSettings(
                 .orElseThrow(() -> new IllegalArgumentException("未配置该点位别名：" + alias));
     }
 
+    /** 允许同一会话重新读取写入开关，但不允许用另一服务器或用户的配置授权当前会话。 */
+    void requireSameConnection(ClientSettings connected) {
+        if (!endpoint.equals(connected.endpoint)
+                || policy != connected.policy
+                || mode != connected.mode
+                || !identityType.equals(connected.identityType)
+                || !username.equals(connected.username)
+                || !passwordEnv.equals(connected.passwordEnv)
+                || !applicationUri.equals(connected.applicationUri)
+                || !pkiDirectory.equals(connected.pkiDirectory)
+                || !pki.equals(connected.pki)
+                || !pkiPasswordEnv.equals(connected.pkiPasswordEnv)
+                || !nodesFile.equals(connected.nodesFile)
+                || !environment.equals(connected.environment)
+                || !serverTrust.equals(connected.serverTrust)) {
+            throw new IllegalArgumentException("连接身份或点表配置已改变，请断开并重新连接后操作");
+        }
+    }
+
     public void requireWrite(PointDefinition point, boolean confirmed) {
         if (!writesEnabled || !confirmed || !point.writable()) {
             throw new IllegalArgumentException("写入被拒绝：需要总开关、点位 writable=true 和 --确认 参数");

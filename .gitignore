@@ -8,6 +8,7 @@
 
 # 构建产物与工具缓存
 target/
+/dist/
 out/
 .cache/
 *.class

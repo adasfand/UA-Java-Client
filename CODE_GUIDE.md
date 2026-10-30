@@ -6,7 +6,7 @@
 
 | 文件 | 职责 | 与其他模块的关系 |
 | --- | --- | --- |
-| `Main.java` | 解析命令、调用操作、显示错误及退出码 | 命令行适配层，调用配置、PKI、连接层 |
+| `Main.java` | 无参数启动桌面；显式参数解析命令、调用操作 | 桌面和命令行的总入口 |
 | `ClientSettings.java` | 读取并校验连接配置、解析相对路径、选择端点、写入门禁 | 统一保存一次连接所用的配置 |
 | `PkiSettings.java` | 校验证书文件名、别名、DNS/IP SAN、组织及有效期 | 由 ClientSettings 加载，LocalPki 使用 |
 | `LocalPki.java` | 生成/加载 PKCS12 身份、导出公开证书、核对指纹并导入信任 | 不生成模拟值，不执行业务读写 |
@@ -15,11 +15,13 @@
 | `UaServices.java` | 有期限的端点发现、逐页浏览、状态检查及 continuation point 清理 | 直接复用 Milo 的服务及传输 API |
 | `UaConnection.java` | 建立认证会话，浏览、读取、受控写入及关闭 | 将配置、PKI、点表和 Milo SDK 串起来 |
 | `DesktopMain.java` | 桌面启动、加载配置及本机外观 | IDEA“服务器客户端”入口 |
+| `DesktopFiles.java` | 首次从模板准备本机文件，保留已有配置 | 由桌面确认框调用，不访问服务器或生成身份 |
+| `DataPanel.java` | 点表展示、按需读取、写授权和范围编辑、一次写入回读 | 复用 ServerWindow 当前已认证会话和同一份配置 |
 | `ClientConfigurationDialog.java` | 可视化编辑当前连接配置 | 服务器 → 连接配置 |
 | `ClientConfiguration.java` | 同一文件快照、参数校验、重复键清理、冲突检测、备份及原子保存 | 完整配置表和连接窗口共用 |
-| `ServerWindow.java` | 服务器菜单、会话结果、断开及退出 | 持有认证会话，退出时释放资源 |
+| `ServerWindow.java` | 连接、证书准备、数据面板、断开及退出 | 持有认证会话，退出时释放资源 |
 | `ServerConnectDialog.java` | 端点列表、地址、用户名、查询和连接 | 后台调用 UaServices.discover / UaConnection |
-| `DesktopEndpoint.java` | 表单地址与所选端点转为一次连接配置 | 保留原 PKI，表单不写回磁盘，不开启写入 |
+| `DesktopEndpoint.java` | 表单地址与所选端点转为一次连接配置 | 保留原 PKI；ServerConnectDialog 负责保存表单 |
 | `DesktopCredentials.java` | 完整认证成功后缓存本次运行的凭据 | 隔离服务器、用户及私钥库；断开保留，清除/退出时清零 |
 | `PointBrowserDialog.java` | 设备树、扫描、勾选与保存的桌面入口 | 后台调用同一个已认证 UaConnection |
 | `PointDiscovery.java` | 有界遍历、循环去重、停止与不完整结果提示 | 复用 UaServices 浏览及 UaConnection 属性读取 |
@@ -27,19 +29,27 @@
 | `DiscoveredPoint.java` | 服务器变量元数据及稳定节点身份 | 以 namespace URI 标识，不依赖易变的 namespace index |
 | `PointCatalog.java` | 增量合并已选择点位、备份和原子保存 | 保留已有业务字段，检测外部修改，新点默认只读 |
 
-`src/test/java` 是离线边界测试；`config/templates` 是公共模板；`config/local` 共享不含口令的本机模拟配置；`pki` 保存各人的身份及信任，不进入仓库；`pom.xml` 固定依赖并打包可运行 JAR。
+`src/test/java` 是离线边界测试；`config/templates` 是公共模板；`config/local` 是被 Git 忽略的本机配置；`pki` 保存各人的身份及信任，不进入仓库；`pom.xml` 固定依赖并打包可运行 JAR。启动器和打包脚本不包含个人 JDK 路径，分发包只含程序、模板与启动器。
 
 ## 桌面连接的调用顺序
 
-`DesktopMain.main` → `ClientSettings.load` → `ServerWindow` → “服务器 / 连接” → `ServerConnectDialog`。
+`Main.main(无参数)` → `DesktopMain.main` →（缺少配置时确认并调用 `DesktopFiles.prepare`）→ `ClientSettings.load` → `ServerWindow`。没有身份时，连接操作先提示通过证书菜单调用 `LocalPki.initialize`；已有身份只加载，不自动重签。
 
 - “查询”：后台调用 `UaServices.discover`，将指定发现地址返回的端点显示到列表。
 - “连接”：`DesktopEndpoint.connection` 生成本次配置，`DesktopCredentials.begin` 开始凭据尝试，再由后台调用 `new UaConnection(settings, attempt)`；成功后提交本次缓存。原身份加载、端点匹配、证书校验与用户认证继续执行。
 - 成功后：主窗口持有 `UaConnection`，连接对话框关闭。只有构造函数完成认证后才显示成功。
-- “断开”：后台调用 `UaConnection.close`，凭据缓存保留；退出时清除缓存并调用 `Stack.releaseSharedResources`。表单操作不写回连接配置，不调用点位值读写函数。
+- “断开”：后台调用 `UaConnection.close`，凭据缓存保留；退出时清除缓存并调用 `Stack.releaseSharedResources`。连接表单保存到同一配置文件，连接本身不写点位值。
 - “点位”：`browseNodes` 为设备树加载节点，`discoverPoints → PointDiscovery.scan → describePoint` 获取变量属性；`PointCatalog.save` 将勾选结果增量合并至配置指定点表。
 
-当前桌面范围是服务器连接、点位发现与选择保存；原有命令行读写能力继续保留。这里使用 Swing 和 Milo，不依赖原 C# DLL 或 Windows COM。具体国产系统及 CPU 架构尚未提供，跨系统运行尚待实机验证。
+“读取全部/所选”：`DataPanel.read` → 当前 `UaConnection.readValues` → 返回原始 DataValue → 表格显示值、质量和源时间。后台操作期间阻止重复请求；更新值不清除所选行。
+
+“点位设置”：`DataPanel.configurePoint` → `PointCatalog.configure` → 校验范围、快照/文件锁、备份并原子替换点表。全局写开关经 `ClientConfiguration.save` 写回当前连接配置。
+
+“写入并回读”：先加载当前配置并检查输入 → 界面确认目标和值 → 再加载最新配置 → `UaConnection.writeValue`。该函数核对当前配置仍对应已认证的端点/用户/身份/点表，且点位定义没有变化；再复用既有门禁、服务端类型/权限校验、一次写入和严格回读。返回 `WriteResult` 后才显示成功；异常不保留被请求点的旧 Good 值充当本次结果。
+
+桌面密码通过 `LocalPki.graphicalSecret` 弹窗获得，终端入口仍可隐藏输入。密码不写到文件；同次运行内的凭据复用不免除服务器认证。
+
+当前桌面范围是第一部分的连接、证书准备、点位发现与按需读写。使用 Swing 和 Milo，不依赖原 C# DLL 或 Windows COM。具体国产系统及 CPU 架构尚未提供，跨系统运行尚待实机验证。
 
 ## 一次读取的调用顺序
 
