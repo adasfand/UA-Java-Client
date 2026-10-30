@@ -52,7 +52,8 @@ UI 与当前配置文件共用一份参数：未连接时打开 **服务器 → 
 src/main/java/cn/buct/ua/    Java 通信、命令行与桌面连接界面源码
 src/test/java/cn/buct/ua/    写入门禁、类型与配置测试
 config/templates/          可提交的配置模板，不含密码
-config/local/              已共享的本机模拟配置及服务器公开证书快照，不含密码
+config/local/              本机连接配置、点表与 KEP 演示工程，不提交
+docs/                      本机演示说明与截图，不提交
 pki/                       各人自己的证书和私钥，不提交
 .cache/                    Maven 依赖、发行包及临时文件，不提交
 target/                    构建产物，不提交
@@ -81,20 +82,34 @@ IDEA 打开本目录的 `pom.xml`，选择 JDK 21。Maven 仓库通过 `.mvn/mav
 
 ## 2. 准备连接配置
 
-仓库已包含 `config/local/` 的本机模拟示例：两个连接配置、两个点表和 `server.der` 公开证书快照。写入默认关闭。换电脑时，按自己的服务器地址、用户名和点位修改；客户端身份仍由各人在本机生成，密码在运行时输入。公开证书快照只对应本次演示服务器，不作为其他服务器的身份。
+`config/local/` 整个目录不提交。新电脑首次使用时，将 `config/templates/client.properties` 和 `config/templates/nodes.properties` 复制到 `config/local/`，保持文件名不变。已有本机配置时保留现有文件。通过桌面“服务器 → 连接配置…”修改服务器地址、策略和用户名，保存会写回同一份本地文件；点位通过浏览选择后保存。客户端身份由各人在本机生成，密码在运行时输入，写入默认关闭。
+
+```powershell
+New-Item -ItemType Directory -Path config/local -Force
+foreach ($name in 'client.properties', 'nodes.properties') {
+    $target = Join-Path config/local $name
+    if (-not (Test-Path -LiteralPath $target)) {
+        Copy-Item -LiteralPath (Join-Path config/templates $name) -Destination $target
+    }
+}
+```
+
+上述复制会保留已有个人配置。
 
 ```powershell
 .\run.ps1 检查配置
 .\run.ps1 发现
 ```
 
-需要独立个人配置时，可从模板复制为 `config/local/client.local.properties` 并在运行参数中指定；`*.local.properties` 被忽略。不要将口令加入已跟踪的配置文件。
+可以在运行参数中指定另一份连接配置；`config/local/` 中的配置都被忽略。当前每份连接配置只保存一个使用中的用户名，UI 修改后下次连接生效。KEPServerEX 用户组及其权限由服务器管理，新增组本身不要求新增客户端文件；更换登录账号时在连接窗口改用户名并输入该账号密码即可。目前没有多账号配置列表或自动同步服务器用户组的功能。不要将密码写入配置文件。
 
 这些命令不需要业务账号密码，也不写业务点位。发现成功只代表服务器返回了端点，不代表认证会话和业务读写通过。
 
 模板匹配开发现场之前发现的 `Basic256 + SignAndEncrypt + username`。每个人都应先执行“发现”，再按自己服务器的实际策略配置；程序不会自动切换到 None，服务器信任方式由 `security.serverTrust` 明确选择。旧策略仅作为当前本机环境的显式兼容配置，生产应以甲方提供的安全配置为准。
 
 所有配置按 UTF-8 读取。配置中的相对路径以配置文件所在目录为基准，避免 IDEA 工作目录变化导致点表丢失。
+
+运行参数统一保存在 `config/`：`config/templates/` 提供模板，`config/local/client.properties` 保存本机连接参数，`config/local/nodes.properties` 保存点位。桌面连接表单读写当前连接配置，点位窗口读写其 `nodes.file` 指定的点表；不另维护演示连接配置。默认桌面入口使用上述本机文件，也允许在启动参数中显式指定另一份配置。查询、连接和浏览还会与服务器通信，不只是操作本地文件。
 
 ## 3. 初始化客户端证书
 
@@ -108,11 +123,13 @@ IDEA 打开本目录的 `pom.xml`，选择 JDK 21。Maven 仓库通过 `.mvn/mav
 - `pki/client.der`：可导入 KEPServerEX 的 OPC UA 配置管理器 → 受信任客户端。
 - `application.uri` 必须与证书的 URI 一致。多人开发时，各人配置一个独立 URI 并各自生成身份，不共享私钥。
 
+PKI 是生成或保存的身份材料，其位置由 `config/local/client.properties` 的 `pki.directory` 指定。执行“初始化证书”时，项目的 `Main → LocalPki.initialize` 调用 Milo 生成客户端密钥和自签名应用证书，并写入 client.p12、client.der；正常连接调用 `LocalPki.load` 读取已有身份。`server-pins/` 则由 `ServerTrust` 保存服务器提供的公开证书，用来核对后续连接，并非由客户端签发服务器证书。该目录不是另一套连接参数文件，不需要随切换账号重新生成。
+
 `pki.file`、`pki.alias` 可选择 PKI 目录内已有的 PKCS12/PFX 私钥身份；生成时的名称、组织、DNS/IP SAN、有效天数由 `pki.*` 配置。模板中的 localhost/回环地址仅用于本机示例，部署时按实际环境填写；已有证书不会因修改配置而自动更新。`client.der` 是公开导出文件名，不能用作私钥库文件名。
 
 在终端中运行时，程序通过控制台隐藏输入；在 IDEA 中没有交互式控制台时，会弹出本机密码输入框。操作者自行输入并确认，密码只在当前进程中使用。也可从本机环境变量 `UA_KEYSTORE_PASSWORD` 和 `UA_PASSWORD` 获取密码；禁止将密码写入共享运行配置、配置模板、截图、提交或日志。
 
-项目的 `.run/` 提供共享 IDEA 运行配置：`01 配置检查`、`02 端点发现`、`03 初始化客户端证书`、`04 浏览节点`、`05 读取点位`、`06 浏览模拟点`，以及需单独准备本机测试配置的 `07 模拟写入42并回读`。它们不保存密码，使用项目 JDK、相对路径和 Maven 模块依赖。UI 联调步骤与前置检查见 [UI_TEST.md](UI_TEST.md)。
+项目的 `.run/` 提供 IDEA 运行入口：配置检查、端点发现、初始化客户端证书、浏览节点、读取点位、浏览模拟点，以及模拟写入42并回读。它们不保存密码，使用项目 JDK、相对路径和 Maven 模块依赖。写入前必须核对当前配置、目标别名和写入门禁；入口存在不等于已经允许写入。UI 联调步骤与前置检查见 [UI_TEST.md](UI_TEST.md)。
 
 ## 4. 服务器证书信任
 
@@ -131,10 +148,10 @@ security.serverTrust=first-use
 从 KEPServerEX 配置管理器导出服务器公开证书，在服务器证书界面独立核对 SHA-256 指纹，再执行：
 
 ```powershell
-.\run.ps1 信任服务器 config\local\client.properties 'config/local/server.der' '<SHA256>'
+.\run.ps1 信任服务器 config\local\client.properties 'pki/server-export.der' '<SHA256>'
 ```
 
-strict 模式下，将示例中的证书路径和 `<SHA256>` 替换为实际文件路径及独立核对过的 64 位十六进制指纹。程序会比较指纹，不符则拒绝导入。
+strict 模式下，先将实际服务器公开证书导出到示例位置，或替换为自己的文件路径；将 `<SHA256>` 替换为独立核对过的 64 位十六进制指纹。程序会比较指纹，不符则拒绝导入。仓库不附带本机服务器证书。
 
 客户端严格检查证书有效期、信任、ApplicationUri、主机名等，并开启会话端点校验。当前旧版 KEPServerEX 的证书曾显示 SHA1 签名、负序列号，以及缺少 `127.0.0.1` IP SAN；这可能影响现代客户端连接。遇到错误应按状态码核实和修正服务端证书/连接主机，不能通过“信任所有证书”处理。
 
@@ -185,7 +202,7 @@ strict 模式下，将示例中的证书路径和 `<SHA256>` 替换为实际文�
 
 ## 协作与 GitHub
 
-Git 根目录仅为本项目，不包含上级“裂解炉2”、安装包或甲方生产资料。公开仓库提交源码、模板、文档及已审核的本机模拟配置，不提交密码、证书私钥、Maven 缓存和构建产物。
+Git 根目录仅为本项目，不包含上级“裂解炉2”、安装包或甲方生产资料。公开仓库提交源码、配置模板和根目录通用说明；`config/local/`、`docs/`、密码、证书私钥、Maven 缓存和构建产物不提交。
 
 首次关联远程仓库并推送（只需执行一次）：
 
@@ -194,7 +211,7 @@ git remote add origin https://github.com/adasfand/UA-Java-Client.git
 git push -u origin main
 ```
 
-后续使用 `git pull --ff-only` 获取更新，提交后执行 `git push`。`.gitignore` 只允许 `config/local/` 中已审核的四份配置和一份公开证书；该目录其他个人文件、PKI、IDE 设置、构建缓存、日志、诊断转储和临时文件仍被排除。
+后续使用 `git pull --ff-only` 获取更新，提交后执行 `git push`。`config/local/` 和 `docs/` 整个目录由 `.gitignore` 排除；团队共享默认值修改 `config/templates/`。已被跟踪的文件需要停止跟踪后忽略规则才会对其生效。
 
 个人仓库通过 Settings → Collaborators 邀请同学/开发者，对方接受后可以推送修改；公开可见本身不代表所有访客都能直接改仓库。建议各人创建功能分支，通过 Pull Request 合并。
 

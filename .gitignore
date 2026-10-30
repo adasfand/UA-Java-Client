@@ -12,12 +12,9 @@ out/
 .cache/
 *.class
 
-# 共享已审核的本机模拟配置；该目录内其他个人文件默认忽略
-config/local/*
-!config/local/client.properties
-!config/local/nodes.properties
-!config/local/write-test.properties
-!config/local/write-test-nodes.properties
+# 本机连接、点位和演示文档；团队共享模板保留在 config/templates/
+/config/local/
+/docs/
 
 # 凭据与 PKI
 pki/
@@ -29,8 +26,6 @@ pki/
 *.pem
 *.der
 *.cer
-# 本机演示服务器的公开证书快照，不含私钥
-!config/local/server.der
 .env
 .env.*
 !.env.example
