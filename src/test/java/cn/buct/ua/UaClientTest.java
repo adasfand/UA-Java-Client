@@ -43,9 +43,6 @@ class UaClientTest {
                 application.uri=urn:test:api
                 application.name=API test
                 pki.directory=pki
-                nodes.file=nodes-does-not-exist.properties
-                writes.enabled=false
-                environment=production
                 """);
     }
 
@@ -128,6 +125,77 @@ class UaClientTest {
             assertEquals("strict", captured.get().serverTrust());
             assertEquals(directory.resolve("pki"), captured.get().pkiDirectory());
             assertArrayEquals(original, Files.readAllBytes(config));
+        }
+    }
+
+    @Test
+    void separateRemoteIpControlsBothConnectionAndDiscoveryWithoutChangingSecurity()
+            throws Exception {
+        byte[] original = Files.readAllBytes(config);
+        var captured = new AtomicReference<ClientSettings>();
+        try (var client =
+                new UaClient(
+                        config,
+                        (settings, credentials) -> {
+                            captured.set(settings);
+                            return new Session();
+                        })) {
+            client.connect(
+                    "opc.tcp://previous.example:4841/ua%2Fsite",
+                    "192.0.2.27", "site-user", null, null);
+            assertEquals("opc.tcp://192.0.2.27:4841/ua%2Fsite", client.endpoint().toString());
+            assertEquals(client.endpoint(), captured.get().endpoint());
+            assertEquals(client.endpoint(), captured.get().discoveryEndpoint());
+            assertEquals("site-user", captured.get().username());
+            assertEquals("Basic256Sha256", captured.get().policy().name());
+            assertEquals("strict", captured.get().serverTrust());
+            assertArrayEquals(original, Files.readAllBytes(config));
+        }
+    }
+
+    @Test
+    void remoteHostCanUseConfiguredPortAndPathWhileEmptyArgumentsKeepSeparateDiscovery()
+            throws Exception {
+        var captured = new AtomicReference<ClientSettings>();
+        try (var client =
+                new UaClient(
+                        config,
+                        (settings, credentials) -> {
+                            captured.set(settings);
+                            return new Session();
+                        })) {
+            client.connect(null, "::1");
+            assertEquals("opc.tcp://[::1]:49320/ua", client.endpoint().toString());
+            assertEquals(client.endpoint(), captured.get().discoveryEndpoint());
+            assertEquals("config-user", captured.get().username());
+            client.close();
+            client.connect(null, null, null, null, null);
+            assertEquals("opc.tcp://localhost:49320/ua", client.endpoint().toString());
+            assertEquals(
+                    "opc.tcp://127.0.0.1:49320/old", captured.get().discoveryEndpoint().toString());
+        }
+    }
+
+    @Test
+    void malformedRemoteHostCannotOpenAConnection() throws Exception {
+        var captured = new AtomicReference<ClientSettings>();
+        try (var client =
+                new UaClient(
+                        config,
+                        (settings, credentials) -> {
+                            captured.set(settings);
+                            return new Session();
+                        })) {
+            for (String invalid :
+                    new String[] {
+                        "opc.tcp://other:4840", "other:4840", "other/path", "user@other"
+                    }) {
+                assertThrows(
+                        Exception.class,
+                        () -> client.connect("opc.tcp://server.example:49320", invalid));
+                assertNull(captured.get());
+                assertFalse(client.isConnected());
+            }
         }
     }
 

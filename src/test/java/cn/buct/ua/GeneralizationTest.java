@@ -55,7 +55,6 @@ class GeneralizationTest {
                 application.uri=urn:test:generalized-client
                 application.name=测试客户端
                 pki.directory=pki
-                nodes.file=nodes.properties
                 """
                         + extras);
         return ClientSettings.load(file);
@@ -126,9 +125,9 @@ class GeneralizationTest {
                                 s.timeoutMs(),
                                 s.pkiDirectory(),
                                 s.pkiPasswordEnv(),
-                                s.nodesFile(),
-                                false,
-                                "simulation"));
+                                s.discoveryEndpoint(),
+                                s.pki(),
+                                s.serverTrust()));
         assertThrows(
                 IllegalArgumentException.class,
                 () -> load("endpoint.url=opc.tcp://server.example:70000/ua\n"));
@@ -138,37 +137,18 @@ class GeneralizationTest {
     }
 
     @Test
-    void guidAndByteStringIdentifiersKeepTheirActualUaTypes() {
-        String guid = "dc66de3e-137c-4f34-9bc4-aa13bcbdc127";
-        var g = new PointDefinition("g", "urn:test", "g", guid, "String", false, null, null);
-        assertEquals(UUID.fromString(guid), g.nodeId(4).getIdentifier());
-        var b = new PointDefinition("b", "urn:test", "b", "AQID", "String", false, null, null);
-        assertEquals("ns=4;b=AQID", b.nodeId(4).toParseableString());
-        assertThrows(
-                IllegalArgumentException.class,
-                () ->
-                        new PointDefinition(
-                                "g", "urn:test", "g", "1-1-1-1-1", "String", false, null, null));
-        assertThrows(
-                IllegalArgumentException.class,
-                () ->
-                        new PointDefinition(
-                                "b", "urn:test", "b", "!bad!", "String", false, null, null));
-    }
-
-    @Test
     void generatedIdentityHonorsConfiguredNamesAliasAndFileAndCanBeReused() throws Exception {
         var settings =
                 load(
                         """
-                pki.file=identity.pfx
-                pki.alias=custom-client
-                pki.commonName=Portable Client
-                pki.organization=Integration Test
-                pki.dnsNames=client.example,localhost
-                pki.ipAddresses=192.0.2.10,::1
-                pki.validityDays=30
-                """);
+                        pki.file=identity.pfx
+                        pki.alias=custom-client
+                        pki.commonName=Portable Client
+                        pki.organization=Integration Test
+                        pki.dnsNames=client.example,localhost
+                        pki.ipAddresses=192.0.2.10,::1
+                        pki.validityDays=30
+                        """);
         char[] master = UUID.randomUUID().toString().toCharArray();
         var supplied = new AtomicReference<char[]>();
         java.util.function.BiFunction<String, String, char[]> credentials =

@@ -13,7 +13,7 @@ out/
 .cache/
 *.class
 
-# 本机连接、点位和演示文档；团队共享模板保留在 config/templates/
+# 本机连接和演示文档；团队共享模板保留在 config/templates/
 /config/local/
 /docs/
 

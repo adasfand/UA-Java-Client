@@ -51,9 +51,6 @@ class ClientConfigurationTest {
                request.timeoutMs=10000
                pki.directory=../../pki
                pki.passwordEnv=UA_KEYSTORE_PASSWORD
-               nodes.file=nodes.properties
-               environment=simulation
-               writes.enabled=false
                """;
     }
 
@@ -108,10 +105,8 @@ class ClientConfigurationTest {
         var config = new ClientConfiguration(file);
         var saved = config.save(Map.of("identity.username", "new-user"));
         assertEquals(directory.resolve("../../pki").normalize(), saved.pkiDirectory());
-        assertEquals(directory.resolve("nodes.properties"), saved.nodesFile());
         String output = Files.readString(file);
         assertTrue(output.contains("pki.directory=../../pki\r\n"));
-        assertTrue(output.contains("nodes.file=nodes.properties\r\n"));
         assertTrue(output.contains("custom.value = 首行\\\r\n  次行\r\n"));
         assertTrue(output.contains("# secret 这里只是注释\r\n"));
         assertEquals("首行次行", ClientSettings.read(file).getProperty("custom.value"));
@@ -172,7 +167,7 @@ class ClientConfigurationTest {
     }
 
     @Test
-    void invalidSettingsAndBrowseLimitsLeaveOriginalUnchanged() throws Exception {
+    void invalidConnectionSettingsLeaveOriginalUnchanged() throws Exception {
         byte[] before = Files.readAllBytes(file);
         var config = new ClientConfiguration(file);
         for (Map<String, String> change :
@@ -180,11 +175,9 @@ class ClientConfigurationTest {
                         Map.of("endpoint.url", "http://localhost:49320"),
                         Map.of("security.mode", "None"),
                         Map.of("identity.username", ""),
-                        Map.of("browse.maxReferences", "0"),
-                        Map.of("browse.maxReferences", "10001"),
-                        Map.of("browse.timeoutMs", "999"),
-                        Map.of("browse.timeoutMs", "300001"),
-                        Map.of("browse.maxReferences", "invalid"))) {
+                        Map.of("request.timeoutMs", "999"),
+                        Map.of("request.timeoutMs", "120001"),
+                        Map.of("request.timeoutMs", "invalid"))) {
             assertThrows(IllegalArgumentException.class, () -> config.save(change));
             assertArrayEquals(before, Files.readAllBytes(file));
         }

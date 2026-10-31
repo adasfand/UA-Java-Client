@@ -50,11 +50,17 @@ public final class LocalPki {
             throws Exception {
         Path directory = settings.pkiDirectory();
         Path target = directory.resolve(settings.pki().fileName());
-        Files.createDirectories(directory);
         if (Files.exists(target)) throw new IllegalArgumentException("客户端证书已存在，不覆盖：" + target);
         char[] password = requestSecret(credentials, settings.pkiPasswordEnv(), "设置本机证书库密码");
         Path temporary = null;
+        Path publicTemporary = null;
+        boolean identityWritten = false;
+        boolean completed = false;
         try {
+            Path publicTarget = directory.resolve("client.der");
+            if (Files.exists(publicTarget) && !Files.isRegularFile(publicTarget))
+                throw new IllegalArgumentException("公开证书位置不是普通文件，请检查 client.der 路径。");
+            Files.createDirectories(directory);
             KeyPair pair = SelfSignedCertificateGenerator.generateRsaKeyPair(2048);
             var builder =
                     new SelfSignedCertificateBuilder(pair)
@@ -77,18 +83,24 @@ public final class LocalPki {
             try (OutputStream out = Files.newOutputStream(temporary)) {
                 store.store(out, password);
             }
+            publicTemporary = Files.createTempFile(directory, "certificate-", ".tmp");
+            Files.write(publicTemporary, certificate.getEncoded());
             Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE);
-            Files.write(directory.resolve("client.der"), certificate.getEncoded());
+            identityWritten = true;
+            Files.move(
+                    publicTemporary,
+                    publicTarget,
+                    StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING);
+            completed = true;
             System.out.println("客户端身份已保存：" + target);
             System.out.println("请将 client.der 导入服务器的受信任客户端；不要发送 p12 私钥文件。");
         } finally {
             Arrays.fill(password, '\0');
+            if (identityWritten && !completed) Files.deleteIfExists(target);
             if (temporary != null) Files.deleteIfExists(temporary);
+            if (publicTemporary != null) Files.deleteIfExists(publicTemporary);
         }
-    }
-
-    public static Identity load(ClientSettings settings) throws Exception {
-        return load(settings, LocalPki::secret);
     }
 
     /** 凭据提供器返回的 char[] 由本方法接管并清零，适合桌面表单或本机凭据来源。 */
@@ -180,13 +192,6 @@ public final class LocalPki {
                         : desktopSecret(prompt, environmentName);
         if (password == null || password.length == 0) throw new IllegalArgumentException("密码不能为空");
         return password;
-    }
-
-    /** 桌面入口始终使用图形密码框，即使程序从带终端的 java 命令启动。 */
-    public static char[] graphicalSecret(String environmentName, String prompt) {
-        String value = System.getenv(environmentName);
-        if (value != null && !value.isEmpty()) return value.toCharArray();
-        return desktopSecret(prompt, environmentName);
     }
 
     /** IDEA 控制台不支持 Console.readPassword 时，由操作者在本机窗口隐藏输入。 */

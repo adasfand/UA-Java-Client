@@ -55,7 +55,6 @@ class ServerTrustTest {
                 application.uri=urn:test:client
                 application.name=测试客户端
                 pki.directory=pki
-                nodes.file=nodes.properties
                 %s
                 """
                         .formatted(port, mode == null ? "" : "security.serverTrust=" + mode));

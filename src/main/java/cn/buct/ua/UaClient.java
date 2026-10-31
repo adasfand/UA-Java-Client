@@ -47,31 +47,41 @@ public final class UaClient implements AutoCloseable {
         connect(serverAddress, null, null, null);
     }
 
+    /** 对应旧版的服务器地址与远程 IP 两个输入；账号及口令使用配置和环境变量。 */
+    public void connect(String serverAddress, String remoteHost) throws Exception {
+        connect(serverAddress, remoteHost, null, null, null);
+    }
+
     /**
      * 地址可为完整 opc.tcp URL，或使用配置中端口/路径的 IP/主机名。 用户名传 null 使用配置值；两个口令传 null/空数组时使用配置指定的环境变量。
      * 不弹出窗口、不修改调用者口令数组；安全策略和身份材料从 configFile 加载。
      */
-    public synchronized void connect(
+    public void connect(
             String serverAddress, String username, char[] userPassword, char[] keystorePassword)
+            throws Exception {
+        connect(serverAddress, null, username, userPassword, keystorePassword);
+    }
+
+    /** 远程 IP/主机由调用者传入，替换服务器地址的主机部分；不绑定客户端本机地址。 */
+    public synchronized void connect(
+            String serverAddress,
+            String remoteHost,
+            String username,
+            char[] userPassword,
+            char[] keystorePassword)
             throws Exception {
         if (isConnected()) throw new IllegalStateException("已有连接，请先断开再连接其他服务器");
         if (session != null) close();
         ClientSettings base = ClientSettings.load(configFile);
-        URI target = base.endpoint();
-        boolean provided = serverAddress != null && !serverAddress.isBlank();
-        if (provided) {
-            String address = serverAddress.trim();
-            target =
-                    address.contains("://")
-                            ? DesktopEndpoint.address(address)
-                            : DesktopEndpoint.withHost(base.endpoint().toString(), address);
-        }
+        URI target = DesktopEndpoint.target(base.endpoint(), serverAddress, remoteHost);
+        boolean provided =
+                serverAddress != null && !serverAddress.isBlank()
+                        || remoteHost != null && !remoteHost.isBlank();
         ClientSettings settings =
                 DesktopEndpoint.connection(
                         base,
                         target,
                         provided ? target : base.discoveryEndpoint(),
-                        null,
                         username == null ? base.username() : username);
         char[] user = copy(userPassword);
         char[] store = copy(keystorePassword);

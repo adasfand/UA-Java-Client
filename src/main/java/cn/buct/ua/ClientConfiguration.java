@@ -61,7 +61,6 @@ public final class ClientConfiguration {
         String output = merge(original, submitted);
         Properties checked = parse(output);
         validateCredentialFields(checked);
-        validateBrowse(checked);
         byte[] bytes = output.getBytes(StandardCharsets.UTF_8);
         Path lockFile = file.resolveSibling(file.getFileName() + ".catalog.lock");
         try (var channel =
@@ -104,13 +103,6 @@ public final class ClientConfiguration {
     private void verifySnapshot() throws IOException {
         if (!Files.exists(file) || !Arrays.equals(snapshot, Files.readAllBytes(file)))
             throw new IOException("连接配置已被外部修改，请从文件重新加载后再保存");
-    }
-
-    private static void validateBrowse(Properties p) {
-        int count = Integer.parseInt(p.getProperty("browse.maxReferences", "500"));
-        long timeout = Long.parseLong(p.getProperty("browse.timeoutMs", "60000"));
-        if (count < 1 || count > 10000 || timeout < 1000 || timeout > 300000)
-            throw new IllegalArgumentException("浏览参数范围：引用 1～10000，总超时 1000～300000ms");
     }
 
     private static void validateCredentialFields(Properties p) {

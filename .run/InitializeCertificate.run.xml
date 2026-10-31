@@ -1,8 +1,9 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="端点发现" type="Application" factoryName="Application">
+  <configuration default="false" name="初始化客户端证书" type="Application" factoryName="Application">
     <option name="MAIN_CLASS_NAME" value="cn.buct.ua.Main" />
     <module name="ua-java-client" />
-    <option name="PROGRAM_PARAMETERS" value="发现 config/local/client.properties" />
+    <option name="PROGRAM_PARAMETERS" value="初始化证书 config/local/client.properties" />
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
     <option name="VM_PARAMETERS" value="-Dfile.encoding=UTF-8 -Dstdout.encoding=UTF-8 -Dstderr.encoding=UTF-8 -Djava.io.tmpdir=.cache/tmp" />
     <method v="2">
       <option name="Make" enabled="true" />

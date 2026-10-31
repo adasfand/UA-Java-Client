@@ -43,8 +43,6 @@ class DesktopWorkflowTest {
         p.setProperty("application.uri", "urn:test:desktop-workflow");
         p.setProperty("application.name", "桌面流程测试");
         p.setProperty("pki.directory", "pki");
-        p.setProperty("nodes.file", "nodes.properties");
-        p.setProperty("environment", "simulation");
         return p;
     }
 
@@ -53,14 +51,10 @@ class DesktopWorkflowTest {
     }
 
     @Test
-    void firstLaunchCopiesConnectionTemplateWithoutPointTableOrAutomaticIdentity()
-            throws Exception {
+    void firstLaunchCopiesConnectionTemplateWithoutAutomaticIdentity() throws Exception {
         Path config = directory.resolve("config/local/client.properties");
         DesktopFiles.prepare(config, Path.of("config/templates"));
         ClientSettings loaded = ClientSettings.load(config);
-        assertEquals(config.getParent().resolve("nodes.properties"), loaded.nodesFile());
-        assertFalse(Files.exists(loaded.nodesFile()));
-        assertFalse(loaded.writesEnabled());
         assertFalse(Files.exists(loaded.pkiDirectory().resolve("client.p12")));
         assertArrayEquals(
                 Files.readAllBytes(Path.of("config/templates/client.properties")),
@@ -70,14 +64,45 @@ class DesktopWorkflowTest {
     @Test
     void configurationPreparationPreservesExistingPersonalFiles() throws Exception {
         Path config = directory.resolve("client.properties");
-        Path nodes = directory.resolve("nodes.properties");
-        Files.writeString(nodes, "# 用户自建点表\nnodes=\n");
-        byte[] original = Files.readAllBytes(nodes);
-        DesktopFiles.prepare(config, Path.of("config/templates"));
-        assertArrayEquals(original, Files.readAllBytes(nodes));
         Files.writeString(config, "# 用户自建连接参数\n");
         DesktopFiles.prepare(config, Path.of("config/templates"));
         assertEquals("# 用户自建连接参数\n", Files.readString(config));
+    }
+
+    @Test
+    void emptyOrCancelledPasswordDoesNotCreateAnEmptyPkiDirectory() {
+        ClientSettings settings = settings(properties());
+        for (char[] missing : new char[][] {null, new char[0]}) {
+            assertThrows(
+                    IllegalArgumentException.class,
+                    () -> LocalPki.initialize(settings, (env, prompt) -> missing));
+            assertFalse(Files.exists(settings.pkiDirectory()));
+        }
+    }
+
+    @Test
+    void directoryCreationFailureStillClearsThePassword() throws Exception {
+        ClientSettings settings = settings(properties());
+        Files.writeString(settings.pkiDirectory(), "not a directory");
+        char[] secret = "unit-test-password".toCharArray();
+        assertThrows(
+                java.io.IOException.class,
+                () -> LocalPki.initialize(settings, (env, prompt) -> secret));
+        assertArrayEquals(new char[secret.length], secret);
+    }
+
+    @Test
+    void invalidPublicCertificateDestinationCannotLeaveAUsablePrivateIdentity() throws Exception {
+        ClientSettings settings = settings(properties());
+        Path publicPath = settings.pkiDirectory().resolve("client.der");
+        Files.createDirectories(publicPath);
+        char[] secret = "unit-test-password".toCharArray();
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> LocalPki.initialize(settings, (env, prompt) -> secret));
+        assertFalse(Files.exists(settings.pkiDirectory().resolve("client.p12")));
+        assertTrue(Files.isDirectory(publicPath));
+        assertArrayEquals(new char[secret.length], secret);
     }
 
     @Test
@@ -100,43 +125,5 @@ class DesktopWorkflowTest {
                                     return null;
                                 }));
         assertArrayEquals(original, Files.readAllBytes(identity));
-    }
-
-    @Test
-    void sameAuthenticatedSessionCanUseAnExplicitlySavedWriteSwitch() {
-        var p = properties();
-        ClientSettings connected = settings(p);
-        p.setProperty("writes.enabled", "true");
-        ClientSettings current = settings(p);
-        assertDoesNotThrow(() -> current.requireSameConnection(connected));
-        var point =
-                new PointDefinition(
-                        "sim", "KEPServerEX", "s", "Demo.Device.sim", "UInt16", true, "0", "100");
-        assertThrows(IllegalArgumentException.class, () -> connected.requireWrite(point, true));
-        assertDoesNotThrow(() -> current.requireWrite(point, true));
-        assertThrows(IllegalArgumentException.class, () -> current.requireWrite(point, false));
-    }
-
-    @Test
-    void changedServerUserIdentityOrEnvironmentCannotAuthorizeOldSession() {
-        ClientSettings connected = settings(properties());
-        for (var change :
-                java.util.Map.of(
-                                "endpoint.url", "opc.tcp://127.0.0.1:4840",
-                                "identity.username", "another-user",
-                                "application.uri", "urn:test:another-application",
-                                "pki.directory", "other-pki",
-                                "nodes.file", "other-nodes.properties",
-                                "environment", "production",
-                                "security.serverTrust", "strict")
-                        .entrySet()) {
-            var p = properties();
-            p.setProperty(change.getKey(), change.getValue());
-            p.setProperty("writes.enabled", "true");
-            assertThrows(
-                    IllegalArgumentException.class,
-                    () -> settings(p).requireSameConnection(connected),
-                    change.getKey());
-        }
     }
 }
