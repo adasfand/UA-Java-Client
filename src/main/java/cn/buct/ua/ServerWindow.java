@@ -20,21 +20,28 @@ import java.util.concurrent.Callable;
 import java.util.function.Consumer;
 
 import javax.swing.BorderFactory;
+import javax.swing.DefaultListModel;
 import javax.swing.JButton;
+import javax.swing.JDialog;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
+import javax.swing.JList;
+import javax.swing.JMenu;
+import javax.swing.JMenuBar;
+import javax.swing.JMenuItem;
 import javax.swing.JPanel;
 import javax.swing.JPasswordField;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
+import javax.swing.ListSelectionModel;
 import javax.swing.SwingWorker;
 import javax.swing.UIManager;
 import javax.swing.WindowConstants;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 
-/** 固定位置输入参数，一次点击调用公开接口；普通操作不弹出窗口。 */
+/** 连接小窗口保留旧版五种操作；三个连接入口共用同一套认证与读写封装。 */
 final class ServerWindow extends JFrame {
     private final Path configFile;
     private ClientSettings settings;
@@ -42,7 +49,14 @@ final class ServerWindow extends JFrame {
     private boolean busy;
     private boolean closing;
     private boolean settingEndpoint;
+    private final JMenuItem openConnection = new JMenuItem("连接服务器…");
+    private final JMenuItem disconnect = new JMenuItem("断开");
+    private final JDialog connectionDialog;
+    private final JTextField connectionStatus = new JTextField();
+    private final DefaultListModel<String> endpointUrls = new DefaultListModel<>();
+    private final JList<String> servers = new JList<>(endpointUrls);
     private final JTextField serverAddress = new JTextField(32);
+    private final JTextField remoteHost = new JTextField(32);
     private final JTextField username = new JTextField(32);
     private final JPasswordField password = new JPasswordField(32);
     private final JPasswordField keystorePassword = new JPasswordField(32);
@@ -50,7 +64,10 @@ final class ServerWindow extends JFrame {
     private final JPanel accountPanel = new JPanel(new GridBagLayout());
     private final JPanel confirmationPanel = new JPanel(new GridBagLayout());
     private final JButton connect = new JButton("连接");
-    private final JButton disconnect = new JButton("断开");
+    private final JButton search = new JButton("查询");
+    private final JButton cancel = new JButton("取消");
+    private final JButton quickConnect = new JButton("一键连接");
+    private final JButton actualConnect = new JButton("实际连接");
     private final JButton prepareCertificate = new JButton("首次生成客户端证书");
     private final JTextField namespace = new JTextField("ns=0");
     private final JTextField identifier = new JTextField("i=2258");
@@ -58,7 +75,7 @@ final class ServerWindow extends JFrame {
     private final JButton read = new JButton("读取");
     private final JButton write = new JButton("写入");
     private final JTextArea result = new JTextArea(4, 52);
-    private final JTextField status = new JTextField("请填写连接参数后点击连接");
+    private final JTextField status = new JTextField("请从“服务器 → 连接服务器…”打开连接窗口");
 
     ServerWindow(ClientSettings defaults, Path config) {
         super("OPC UA 客户端");
@@ -66,21 +83,32 @@ final class ServerWindow extends JFrame {
         settings = defaults;
         client = new UaClient(config);
         serverAddress.setText(defaults.endpoint().toString());
+        remoteHost.setText(defaults.endpoint().getHost());
         username.setText(defaults.username());
         serverAddress.setToolTipText("填写服务器的 opc.tcp://IP:端口/路径；只填 IP 时沿用配置中的端口和路径");
+        remoteHost.setToolTipText("目标服务器IP或主机名；查询、连接及一键连接使用此主机，实际连接使用完整现场预设");
+        search.setToolTipText("查询该目标的UA端点，不查询本机电脑名，不登录，不修改证书信任");
+        quickConnect.setToolTipText("使用配置的快捷服务器地址及当前远程IP，无需先查询");
+        actualConnect.setToolTipText("使用配置文件中的完整现场服务器地址，无需先查询");
         password.setToolTipText("KEP 用户管理器中该用户的密码，不是用户组名称");
         keystorePassword.setToolTipText("打开本机 client.p12 的密码；首次没有证书时，在这里设置新密码");
         namespace.setToolTipText("命名空间 URI：nsu=KEPServerEX；或现场提供的数字索引 ns=数字");
         identifier.setToolTipText("字符串节点：s=通道.设备.标签；数字节点：i=数字");
         writeValue.setToolTipText("仅读取时不用填写");
         setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
-        setMinimumSize(new Dimension(740, 600));
-        setSize(850, 650);
+        setMinimumSize(new Dimension(740, 400));
+        setSize(850, 460);
         setLocationRelativeTo(null);
+
+        var serverMenu = new JMenu("服务器");
+        serverMenu.add(openConnection);
+        serverMenu.add(disconnect);
+        var menus = new JMenuBar();
+        menus.add(serverMenu);
+        setJMenuBar(menus);
 
         var content = new JPanel(new BorderLayout(8, 8));
         content.setBorder(BorderFactory.createEmptyBorder(10, 12, 10, 12));
-        content.add(connectionPanel(), BorderLayout.NORTH);
         var operations = new JPanel(new BorderLayout(6, 6));
         operations.setBorder(BorderFactory.createTitledBorder("读写"));
         var fields = new JPanel(new GridBagLayout());
@@ -105,12 +133,34 @@ final class ServerWindow extends JFrame {
         status.setEditable(false);
         content.add(status, BorderLayout.SOUTH);
         setContentPane(content);
-        connect.addActionListener(e -> connect());
+        connectionDialog = new JDialog(this, "服务器连接", true);
+        connectionDialog.setContentPane(connectionPanel());
+        connectionDialog.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
+        connectionDialog.getRootPane().setDefaultButton(connect);
+        connectionDialog.addWindowListener(
+                new WindowAdapter() {
+                    @Override
+                    public void windowClosing(WindowEvent e) {
+                        if (!busy) connectionDialog.setVisible(false);
+                    }
+                });
+        openConnection.addActionListener(e -> showConnection());
+        search.addActionListener(e -> search());
+        connect.addActionListener(e -> connect(ClientSettings.ConnectionAction.CONNECT));
+        quickConnect.addActionListener(e -> connect(ClientSettings.ConnectionAction.QUICK));
+        actualConnect.addActionListener(e -> connect(ClientSettings.ConnectionAction.ACTUAL));
+        cancel.addActionListener(e -> connectionDialog.setVisible(false));
         disconnect.addActionListener(e -> disconnect());
         prepareCertificate.addActionListener(e -> prepareCertificate());
         read.addActionListener(e -> read());
         write.addActionListener(e -> write());
         clearAccountPasswordWhenTargetChanges();
+        servers.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        servers.addListSelectionListener(
+                e -> {
+                    if (!e.getValueIsAdjusting() && !busy && servers.getSelectedValue() != null)
+                        serverAddress.setText(servers.getSelectedValue());
+                });
         addWindowListener(
                 new WindowAdapter() {
                     @Override
@@ -118,7 +168,7 @@ final class ServerWindow extends JFrame {
                         if (closing) return;
                         closing = true;
                         updateControls();
-                        if (busy) status.setText("等待当前操作结束后退出…");
+                        if (busy) setStatus("等待当前操作结束后退出…");
                         else finishClose();
                     }
                 });
@@ -127,28 +177,78 @@ final class ServerWindow extends JFrame {
 
     private JPanel connectionPanel() {
         var panel = new JPanel(new BorderLayout(0, 4));
-        panel.setBorder(BorderFactory.createTitledBorder("连接"));
+        panel.setBorder(BorderFactory.createEmptyBorder(10, 12, 10, 12));
+        servers.setVisibleRowCount(3);
+        var list = new JScrollPane(servers);
+        list.setBorder(BorderFactory.createTitledBorder("OPC UA 服务器"));
+        panel.add(list, BorderLayout.NORTH);
         var fields = new JPanel(new GridBagLayout());
-        row(fields, 0, "服务器地址 / IP", serverAddress);
+        row(fields, 0, "服务器地址", serverAddress);
+        row(fields, 1, "远程 IP 地址", remoteHost);
         row(accountPanel, 0, "用户名", username);
         row(accountPanel, 1, "用户密码", password);
-        var account = constraints(1);
+        var account = constraints(2);
         account.gridwidth = 2;
         account.weightx = 1;
         fields.add(accountPanel, account);
-        row(fields, 2, "本机私钥库密码", keystorePassword);
+        row(fields, 3, "本机私钥库密码", keystorePassword);
         row(confirmationPanel, 0, "确认新密码", confirmation);
-        var confirm = constraints(3);
+        var confirm = constraints(4);
         confirm.gridwidth = 2;
         fields.add(confirmationPanel, confirm);
-        panel.add(fields, BorderLayout.NORTH);
-        panel.add(
+        panel.add(fields, BorderLayout.CENTER);
+        var footer = new JPanel(new BorderLayout(4, 4));
+        footer.add(
                 note(
                         "服务器地址来自 KEP 的服务器端点；用户密码用于服务器登录。\n"
                                 + "本机私钥库密码用于打开 client.p12；首次无证书时设置新密码并确认。"),
-                BorderLayout.CENTER);
-        panel.add(actions(prepareCertificate, connect, disconnect), BorderLayout.SOUTH);
+                BorderLayout.NORTH);
+        var buttons = new JPanel(new java.awt.GridLayout(2, 3, 8, 6));
+        for (var button : new JButton[] {search, connect, cancel, quickConnect, actualConnect})
+            buttons.add(button);
+        var controls = new JPanel(new BorderLayout(4, 4));
+        controls.add(prepareCertificate, BorderLayout.NORTH);
+        controls.add(buttons, BorderLayout.CENTER);
+        footer.add(controls, BorderLayout.CENTER);
+        connectionStatus.setEditable(false);
+        footer.add(connectionStatus, BorderLayout.SOUTH);
+        panel.add(footer, BorderLayout.SOUTH);
         return panel;
+    }
+
+    private void showConnection() {
+        if (busy || closing || client.isConnected()) return;
+        try {
+            settings = ClientSettings.load(configFile);
+            updateControls();
+            connectionDialog.pack();
+            connectionDialog.setLocationRelativeTo(this);
+            connectionDialog.setVisible(true);
+        } catch (Exception e) {
+            setStatus(failure(e));
+        }
+    }
+
+    private void search() {
+        String address = serverAddress.getText();
+        String host = remoteHost.getText();
+        endpointUrls.clear();
+        runTask(
+                () -> {
+                    ClientSettings target =
+                            ClientSettings.load(configFile).withConnection(address, host, null);
+                    return UaConnection.discover(target.endpoint().toString(), target.timeoutMs())
+                            .stream()
+                            .map(e -> e.getEndpointUrl())
+                            .filter(java.util.Objects::nonNull)
+                            .distinct()
+                            .toList();
+                },
+                urls -> {
+                    urls.forEach(endpointUrls::addElement);
+                    setStatus("查询到 " + urls.size() + " 个服务器地址；可选择或直接填写，查询不代表认证成功。");
+                },
+                "正在查询服务器…");
     }
 
     private void clearAccountPasswordWhenTargetChanges() {
@@ -174,6 +274,7 @@ final class ServerWindow extends JFrame {
                     }
                 };
         serverAddress.getDocument().addDocumentListener(listener);
+        remoteHost.getDocument().addDocumentListener(listener);
         username.getDocument().addDocumentListener(listener);
     }
 
@@ -193,7 +294,7 @@ final class ServerWindow extends JFrame {
                 throw new IllegalArgumentException("请设置本机私钥库新密码，并在确认栏输入相同密码。");
         } catch (Exception e) {
             Arrays.fill(secret, '\0');
-            status.setText(failure(e));
+            setStatus(failure(e));
             return;
         } finally {
             Arrays.fill(repeated, '\0');
@@ -212,20 +313,22 @@ final class ServerWindow extends JFrame {
                 },
                 certificate -> {
                     confirmation.setText("");
+                    connectionDialog.setVisible(false);
                     result.setText(
                             "客户端证书已生成：\n"
                                     + certificate
                                     + "\n请将该公开证书导入 KEP“受信任的客户端”，重新初始化后再连接。"
                                     + "\n私钥库留在本机："
                                     + identityFile());
-                    status.setText("证书已生成，尚未连接；请先完成双方信任。");
+                    setStatus("证书已生成，尚未连接；请先完成双方信任。");
                 },
                 "正在生成客户端证书…");
     }
 
-    private void connect() {
+    private void connect(ClientSettings.ConnectionAction action) {
         if (busy || closing || client.isConnected()) return;
         String endpoint = serverAddress.getText().trim();
+        String host = remoteHost.getText().trim();
         String user = username.getText().trim();
         char[] userSecret = password.getPassword();
         char[] keySecret = keystorePassword.getPassword();
@@ -235,26 +338,30 @@ final class ServerWindow extends JFrame {
             settings = configuration.settings();
             if (!Files.isRegularFile(identityFile()))
                 throw new IllegalArgumentException("请先在页面设置并确认新密码，生成客户端证书，完成双方信任。");
-            if (endpoint.isEmpty()) throw new IllegalArgumentException("请输入服务器地址或 IP。");
-            settings.withConnection(endpoint, null, user);
+            if (action == ClientSettings.ConnectionAction.CONNECT && endpoint.isEmpty())
+                throw new IllegalArgumentException("请输入服务器地址或 IP。");
             if (settings.identityType().equals("username")
                     && (user.isEmpty() || userSecret.length == 0))
                 throw new IllegalArgumentException("请输入服务器用户名及用户密码。");
+            ClientSettings target =
+                    ClientSettings.connectionTarget(configFile, action, endpoint, host, user);
+            endpoint = target.endpoint().toString();
             if (keySecret.length == 0)
                 throw new IllegalArgumentException("请输入创建本机 client.p12 时设置的私钥库密码。");
         } catch (Exception e) {
             Arrays.fill(userSecret, '\0');
             Arrays.fill(keySecret, '\0');
-            status.setText(failure(e));
+            setStatus(failure(e));
             updateControls();
             return;
         }
+        final String targetEndpoint = endpoint;
         runTask(
                 () -> {
                     try {
                         client.close();
                         client = new UaClient(configFile);
-                        client.connect(endpoint, user, userSecret, keySecret);
+                        client.connect(targetEndpoint, user, userSecret, keySecret);
                         String actual = client.endpoint().toString();
                         try {
                             configuration.save(
@@ -278,13 +385,15 @@ final class ServerWindow extends JFrame {
                     settingEndpoint = true;
                     try {
                         serverAddress.setText(client.endpoint().toString());
+                        remoteHost.setText(client.endpoint().getHost());
                     } finally {
                         settingEndpoint = false;
                     }
                     result.setText("尚未读取");
-                    status.setText(message);
+                    connectionDialog.setVisible(false);
+                    setStatus(message);
                 },
-                "正在连接…");
+                "正在连接：" + targetEndpoint);
     }
 
     private void disconnect() {
@@ -295,7 +404,7 @@ final class ServerWindow extends JFrame {
                 },
                 ignored -> {
                     result.setText("尚未读取");
-                    status.setText("已断开");
+                    setStatus("已断开");
                 },
                 "正在断开…");
     }
@@ -316,7 +425,7 @@ final class ServerWindow extends JFrame {
                                             value.getSourceTime() == null
                                                     ? "无"
                                                     : value.getSourceTime().getJavaInstant()));
-                    status.setText("读取成功");
+                    setStatus("读取成功");
                 },
                 "正在读取…");
     }
@@ -327,7 +436,7 @@ final class ServerWindow extends JFrame {
         String value = writeValue.getText();
         runTask(
                 () -> client.write(UaAddress.fromParts(space, node), value),
-                code -> status.setText("写入服务已接受：" + code + "；可点击读取核对。"),
+                code -> setStatus("写入服务已接受：" + code + "；可点击读取核对。"),
                 "正在写入…");
     }
 
@@ -344,7 +453,7 @@ final class ServerWindow extends JFrame {
     private <T> void runTask(Callable<T> task, Consumer<T> complete, String progress) {
         if (busy || closing) return;
         busy = true;
-        status.setText(progress);
+        setStatus(progress);
         updateControls();
         new SwingWorker<T, Void>() {
             @Override
@@ -358,7 +467,7 @@ final class ServerWindow extends JFrame {
                     T value = get();
                     if (!closing) complete.accept(value);
                 } catch (Exception e) {
-                    status.setText(failure(e));
+                    setStatus(failure(e));
                     if (progress.equals("正在读取…")) result.setText("读取未完成");
                 } finally {
                     busy = false;
@@ -379,9 +488,15 @@ final class ServerWindow extends JFrame {
         prepareCertificate.setEnabled(available && !connected && missing);
         for (var field :
                 new JTextField[] {
-                    serverAddress, username, password, keystorePassword, confirmation
+                    serverAddress, remoteHost, username, password, keystorePassword, confirmation
                 }) field.setEnabled(available && !connected);
         connect.setEnabled(available && !connected && !missing);
+        quickConnect.setEnabled(available && !connected && !missing);
+        actualConnect.setEnabled(available && !connected && !missing);
+        search.setEnabled(available && !connected);
+        cancel.setEnabled(available);
+        servers.setEnabled(available && !connected);
+        openConnection.setEnabled(available && !connected);
         disconnect.setEnabled(available && connected);
         namespace.setEnabled(available);
         identifier.setEnabled(available);
@@ -392,7 +507,7 @@ final class ServerWindow extends JFrame {
 
     private void finishClose() {
         busy = true;
-        status.setText("正在退出…");
+        setStatus("正在退出…");
         updateControls();
         new SwingWorker<Void, Void>() {
             @Override
@@ -410,10 +525,16 @@ final class ServerWindow extends JFrame {
                 password.setText("");
                 keystorePassword.setText("");
                 confirmation.setText("");
+                connectionDialog.dispose();
                 dispose();
                 System.exit(0);
             }
         }.execute();
+    }
+
+    private void setStatus(String message) {
+        status.setText(message);
+        connectionStatus.setText(message);
     }
 
     private static JPanel actions(JButton... buttons) {

@@ -276,7 +276,7 @@ public final class UaConnection implements AutoCloseable {
     }
 
     /** 内部发现匹配端点，独立限定请求及清理期限。 */
-    private static List<EndpointDescription> discover(String url, long timeoutMs) throws Exception {
+    static List<EndpointDescription> discover(String url, long timeoutMs) throws Exception {
         long deadline = deadline(timeoutMs);
         var endpoint =
                 new EndpointDescription(

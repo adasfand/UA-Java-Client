@@ -25,11 +25,13 @@ ua.connect(serverAddress, username, userPassword, keystorePassword);
 
 推荐使用上面的四参数接口；安全配置部署完毕、凭据通过环境变量准备时也可只传serverAddress。为兼容已有调用方，仍保留`connect(serverAddress, remoteHost)`和五参数重载；remoteHost为String，用于替换URL的目标服务器主机，不是客户端绑定IP。只要传入地址或远程主机，发现与连接都会使用合成后的最终URL；两者都未提供时，保留文件中的独立发现配置。
 
-桌面在固定的“服务器地址 / IP”输入框填写KEP的一条完整URL，或只填目标服务器IP/主机名并沿用配置端口、路径。输入账号、用户密码、本机私钥库密码后直接点击连接，无查询电脑名或连接弹窗。成功后保存最终endpoint URL。Java代码不固定现场IP；改变目标IP也不会跳过服务器端点匹配和证书主机名/IP校验。
+桌面通过服务器菜单打开连接小窗口，提供查询、连接、取消、一键连接、实际连接五个按钮。输入服务器URL、远程IP、账号及两类密码，三个连接按钮根据地址来源选择目标，统一调用`UaClient.connect`，不再弹出额外密码框。成功后保存最终endpoint URL。Java代码不固定现场IP；改变目标IP不会跳过端点匹配和证书主机名/IP校验。
 
 UA使用endpoint URL，旧C#的`Connect(IP, ProgID)`是OPC DA接口，不能原样套用。服务器地址中本来就包括主机/IP和端口，UA不需要再查询本地电脑名称。
 
-旧工程`ServerConnect.cs`的普通连接先通过DNS取得主机名，查询并选择OPC DA服务器，再调用`Srv.Connect(HostName, txtOPCServerName.Text)`；“一键连接”直接传入预设IP与ProgID。之后调用`Srv.GetStatus`检查状态，`Form1.cs`在成功后创建`SyncIOGroup(Srv)`供统一读写。Java对应为`UaClient.connect`建立并持有同一认证会话，成功后调用`read(address)`和`write(address, value)`；断开调用`close()`。UI直接传地址及必要凭据，安全策略和身份材料仍从配置加载。
+旧工程`ServerConnect.cs`的查询先通过DNS取得目标主机名并列出DA服务器；普通连接使用该主机及选中的ProgID；“一键连接”使用已查到的HostName和固定ProgID；“实际连接”则固定IP和ProgID。之后调用`Srv.GetStatus`，主程序创建`SyncIOGroup(Srv)`供读写。Java按UA协议适配：查询GetEndpoints；普通连接用输入；一键连接用预设URL和当前远程IP；实际连接用完整现场URL；取消仅关闭窗口。IP和URL均来自输入或配置，三个入口共用认证会话，不复制旧DA硬编码值，也不要求先做DNS查询。
+
+快捷预设键为`connection.quickUrl`（留空用`endpoint.url`）和`connection.actualUrl`（无默认现场地址，必须显式提供完整URL）。`ClientSettings.connectionTarget`统一选择目标，保持安全策略和证书配置不变；查询复用`UaConnection.discover`，不加载私钥、不认证账号、不固定服务器证书。窗口只列出不同的URL，连接时仍核对策略、模式、身份类型和证书。
 
 只提供IP时，仍须事先知道服务器的端口和可选路径，不能从IP自动推断。输入地址应与服务器发布的endpoint和证书主机名/IP SAN相符；账号和安全策略也必须与服务器实际配置匹配。
 
@@ -128,7 +130,7 @@ try (UaClient ua = new UaClient(Path.of("config/local/client.properties"))) {
 
 ## 7. 本项目的函数调用过程
 
-桌面入口为`Main.main(无参数)` → `Main.launchDesktop` → `ServerWindow`。连接参数在主页面直接输入，点击连接调用四参数接口。命名空间与节点标识经`UaAddress.fromParts`组合为读写共用的完整NodeId，写入另填值。在`SwingWorker`后台线程调用同一套公开接口，结果与错误显示在页面内。
+桌面入口为`Main.main(无参数)` → `Main.launchDesktop` → `ServerWindow`。连接小窗口的三个连接按钮经`ClientSettings.connectionTarget`选择地址后，统一调用四参数接口。命名空间与节点标识经`UaAddress.fromParts`组合为读写共用的完整NodeId，写入另填值。在`SwingWorker`后台线程调用同一套公开接口，结果与错误显示在页面内。
 
 | 操作 | 调用过程 | 结果处理 |
 | --- | --- | --- |
@@ -177,7 +179,7 @@ try (UaClient ua = new UaClient(Path.of("config/local/client.properties"))) {
 | 尚无本机客户端身份 | 现在自行设置并确认一个新密码 | 生成密钥对及客户端证书，用新密码保存client.p12，并导出client.der |
 | 已有client.p12 | 输入创建该文件时设置的密码 | 本机打开私钥库，加载原密钥及证书，不重新生成身份 |
 
-密码保护的是包含私钥的PKCS12文件，不是公开证书本身。client.der没有上述密码，不需要把client.p12或私钥库密码交给KEP。KEP用户名/密码是另外一组凭据，由KEP用户管理器维护，用于用户认证和权限判断。UI在主页面输入私钥库密码；首次设置时多一个确认栏，普通连接不弹窗。
+密码保护的是包含私钥的PKCS12文件，不是公开证书本身。client.der没有上述密码，不需要把client.p12或私钥库密码交给KEP。KEP用户名/密码是另外一组凭据，由KEP用户管理器维护，用于用户认证和权限判断。UI在连接窗口输入私钥库密码；首次设置时多一个确认栏，不再弹出额外口令窗口。
 
 client.p12和client.der都属于同一个Java客户端身份；KEP服务器另有自己独立的身份和证书。双向验证涉及这两端应用身份，不能以生成了两个客户端文件作为已经完成双向认证的证据。
 

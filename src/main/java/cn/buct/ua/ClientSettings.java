@@ -151,6 +151,39 @@ public record ClientSettings(
         return from(read(absolute), absolute);
     }
 
+    enum ConnectionAction {
+        CONNECT,
+        QUICK,
+        ACTUAL
+    }
+
+    /** 三个连接入口只改变地址来源，账号和安全配置共用同一套校验。 */
+    static ClientSettings connectionTarget(
+            Path file, ConnectionAction action, String address, String remoteHost, String username)
+            throws IOException, URISyntaxException {
+        Properties p = read(file);
+        ClientSettings base = from(p, file);
+        if (action == ConnectionAction.ACTUAL
+                && p.getProperty("connection.actualUrl", "").isBlank())
+            throw new IllegalArgumentException("尚未配置现场服务器地址 connection.actualUrl，请向现场确认后填写配置。");
+        return switch (action) {
+            case CONNECT -> base.withConnection(address, remoteHost, username);
+            case QUICK ->
+                    base.withConnection(
+                            p.getProperty("connection.quickUrl", "").isBlank()
+                                    ? base.endpoint().toString()
+                                    : parseEndpoint(p.getProperty("connection.quickUrl"))
+                                            .toString(),
+                            remoteHost,
+                            username);
+            case ACTUAL ->
+                    base.withConnection(
+                            parseEndpoint(required(p, "connection.actualUrl")).toString(),
+                            null,
+                            username);
+        };
+    }
+
     /** 解析同一份配置快照；相对路径仍以实际配置文件目录为基准。 */
     static ClientSettings from(Properties p, Path file) {
         Path absolute = file.toAbsolutePath().normalize();

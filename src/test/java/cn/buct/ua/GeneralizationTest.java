@@ -73,6 +73,70 @@ class GeneralizationTest {
     }
 
     @Test
+    void threeConnectionButtonsUseDistinctAddressSourcesWithIdenticalSecurity() throws Exception {
+        var base =
+                load(
+                        "connection.quickUrl=opc.tcp://quick.example:4841/quick%2Fua\n"
+                                + "connection.actualUrl=opc.tcp://plant.example:4842/production\n");
+        Path file = directory.resolve("client.properties");
+        var normal =
+                ClientSettings.connectionTarget(
+                        file,
+                        ClientSettings.ConnectionAction.CONNECT,
+                        "opc.tcp://manual.example:4843/manual",
+                        "192.0.2.15",
+                        "site-user");
+        var quick =
+                ClientSettings.connectionTarget(
+                        file,
+                        ClientSettings.ConnectionAction.QUICK,
+                        "opc.tcp://ignored.example:4999/ignored",
+                        "192.0.2.16",
+                        "site-user");
+        var actual =
+                ClientSettings.connectionTarget(
+                        file,
+                        ClientSettings.ConnectionAction.ACTUAL,
+                        "opc.tcp://ignored.example:4999/ignored",
+                        "192.0.2.17",
+                        "site-user");
+        assertEquals("opc.tcp://192.0.2.15:4843/manual", normal.endpoint().toString());
+        assertEquals("opc.tcp://192.0.2.16:4841/quick%2Fua", quick.endpoint().toString());
+        assertEquals("opc.tcp://plant.example:4842/production", actual.endpoint().toString());
+        for (var target : List.of(normal, quick, actual)) {
+            assertEquals(base.policy(), target.policy());
+            assertEquals(base.mode(), target.mode());
+            assertEquals(base.serverTrust(), target.serverTrust());
+            assertEquals(base.pkiDirectory(), target.pkiDirectory());
+            assertEquals("site-user", target.username());
+            assertEquals(target.endpoint(), target.discoveryEndpoint());
+        }
+        assertEquals(base.endpoint(), ClientSettings.load(file).endpoint());
+    }
+
+    @Test
+    void quickCanUseConfiguredEndpointButActualNeverGuessesMissingProductionAddress()
+            throws Exception {
+        var base = load("");
+        Path file = directory.resolve("client.properties");
+        var quick =
+                ClientSettings.connectionTarget(
+                        file, ClientSettings.ConnectionAction.QUICK, "", "", "site-user");
+        assertEquals(base.endpoint(), quick.endpoint());
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        ClientSettings.connectionTarget(
+                                file, ClientSettings.ConnectionAction.ACTUAL, "", "", "site-user"));
+        load("connection.actualUrl=192.0.2.18\n");
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        ClientSettings.connectionTarget(
+                                file, ClientSettings.ConnectionAction.ACTUAL, "", "", "site-user"));
+    }
+
+    @Test
     void independentDiscoveryAndEndpointSelectionRemainExplicit() throws Exception {
         var settings = load("endpoint.discoveryUrl=opc.tcp://192.0.2.20:4840/discovery\n");
         assertEquals("192.0.2.20", settings.discoveryEndpoint().getHost());
