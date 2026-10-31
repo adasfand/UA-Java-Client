@@ -1,37 +1,48 @@
 package cn.buct.ua;
 
+import static org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.Unsigned.ubyte;
 import static org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.Unsigned.uint;
 
+import org.eclipse.milo.opcua.sdk.client.DiscoveryClient;
 import org.eclipse.milo.opcua.sdk.client.OpcUaClient;
 import org.eclipse.milo.opcua.sdk.client.OpcUaClientConfig;
 import org.eclipse.milo.opcua.sdk.client.identity.AnonymousProvider;
 import org.eclipse.milo.opcua.sdk.client.identity.IdentityProvider;
 import org.eclipse.milo.opcua.sdk.client.identity.UsernameProvider;
 import org.eclipse.milo.opcua.stack.core.AttributeId;
+import org.eclipse.milo.opcua.stack.core.Stack;
 import org.eclipse.milo.opcua.stack.core.UaException;
 import org.eclipse.milo.opcua.stack.core.security.FileBasedCertificateQuarantine;
 import org.eclipse.milo.opcua.stack.core.security.FileBasedTrustListManager;
+import org.eclipse.milo.opcua.stack.core.security.SecurityPolicy;
 import org.eclipse.milo.opcua.stack.core.types.builtin.DataValue;
 import org.eclipse.milo.opcua.stack.core.types.builtin.NodeId;
 import org.eclipse.milo.opcua.stack.core.types.builtin.QualifiedName;
 import org.eclipse.milo.opcua.stack.core.types.builtin.Variant;
 import org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.UByte;
+import org.eclipse.milo.opcua.stack.core.types.enumerated.MessageSecurityMode;
 import org.eclipse.milo.opcua.stack.core.types.enumerated.TimestampsToReturn;
+import org.eclipse.milo.opcua.stack.core.types.structured.EndpointDescription;
 import org.eclipse.milo.opcua.stack.core.types.structured.ReadValueId;
 import org.eclipse.milo.opcua.stack.core.types.structured.WriteRequest;
 import org.eclipse.milo.opcua.stack.core.types.structured.WriteResponse;
 import org.eclipse.milo.opcua.stack.core.types.structured.WriteValue;
+import org.eclipse.milo.opcua.stack.transport.client.tcp.OpcTcpClientTransport;
+import org.eclipse.milo.opcua.stack.transport.client.tcp.OpcTcpClientTransportConfig;
 
 import java.nio.CharBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.function.BiFunction;
 
 /** 单次连接的生命周期。无定时控制、无自动重放写入。 */
 public final class UaConnection implements AutoCloseable {
+    private static final long MAX_CLEANUP_TIMEOUT_MS = 5000;
     private static final int ACCESS_WRITE = 0x02;
     private static final int SCALAR_VALUE_RANK = -1;
 
@@ -58,9 +69,7 @@ public final class UaConnection implements AutoCloseable {
         try {
             var rejected = settings.pkiDirectory().resolve("rejected");
             Files.createDirectories(rejected);
-            var endpoints =
-                    UaServices.discover(
-                            settings.discoveryEndpoint().toString(), settings.timeoutMs());
+            var endpoints = discover(settings.discoveryEndpoint().toString(), settings.timeoutMs());
             var selected = settings.selectEndpoint(endpoints);
             var validator =
                     ServerTrust.create(
@@ -263,6 +272,74 @@ public final class UaConnection implements AutoCloseable {
         if (failure != null) {
             if (failure instanceof InterruptedException) Thread.currentThread().interrupt();
             throw failure;
+        }
+    }
+
+    /** 内部发现匹配端点，独立限定请求及清理期限。 */
+    private static List<EndpointDescription> discover(String url, long timeoutMs) throws Exception {
+        long deadline = deadline(timeoutMs);
+        var endpoint =
+                new EndpointDescription(
+                        url,
+                        null,
+                        null,
+                        MessageSecurityMode.None,
+                        SecurityPolicy.None.getUri(),
+                        null,
+                        Stack.TCP_UASC_UABINARY_TRANSPORT_URI,
+                        ubyte(0));
+        var transport =
+                new OpcTcpClientTransport(
+                        OpcTcpClientTransportConfig.newBuilder()
+                                .setConnectTimeout(uint(timeoutMs))
+                                .setAcknowledgeTimeout(uint(timeoutMs))
+                                .build());
+        var discovery = new DiscoveryClient(endpoint, transport);
+        Exception failure = null;
+        try {
+            await(discovery.connectAsync(), deadline);
+            var response =
+                    await(
+                            discovery.getEndpoints(
+                                    url,
+                                    new String[0],
+                                    new String[] {Stack.TCP_UASC_UABINARY_TRANSPORT_URI}),
+                            deadline);
+            var endpoints = response.getEndpoints();
+            return endpoints == null ? List.of() : List.copyOf(Arrays.asList(endpoints));
+        } catch (Exception e) {
+            failure = e;
+            throw e;
+        } finally {
+            // 清理有独立的短期限；调用超时也必须发起断开，而非等待请求自行结束。
+            try {
+                discovery.disconnectAsync().get(cleanupTimeout(timeoutMs), TimeUnit.MILLISECONDS);
+            } catch (Exception cleanup) {
+                if (cleanup instanceof InterruptedException) Thread.currentThread().interrupt();
+                if (failure != null) failure.addSuppressed(cleanup);
+                else throw cleanup;
+            }
+        }
+    }
+
+    private static long deadline(long timeoutMs) {
+        if (timeoutMs < 1 || timeoutMs > 120_000)
+            throw new IllegalArgumentException("服务超时应为 1—120000 毫秒");
+        return System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
+    }
+
+    private static long cleanupTimeout(long timeoutMs) {
+        return Math.min(timeoutMs, MAX_CLEANUP_TIMEOUT_MS);
+    }
+
+    private static <T> T await(CompletableFuture<T> future, long deadline) throws Exception {
+        long remaining = deadline - System.nanoTime();
+        if (remaining <= 0) throw new TimeoutException("OPC UA 操作超过调用期限");
+        try {
+            return future.get(remaining, TimeUnit.NANOSECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw e;
         }
     }
 }

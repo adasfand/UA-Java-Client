@@ -2,17 +2,22 @@ package cn.buct.ua;
 
 import org.eclipse.milo.opcua.stack.core.Stack;
 
+import java.awt.Font;
+import java.awt.GraphicsEnvironment;
 import java.nio.file.Path;
-import java.util.Arrays;
 
-/** 命令行入口；“桌面”命令转交独立的桌面入口，其余操作保持单次执行。 */
+import javax.swing.JOptionPane;
+import javax.swing.SwingUtilities;
+import javax.swing.UIManager;
+import javax.swing.plaf.FontUIResource;
+
+/** 启动桌面客户端，并提供部署用的配置和证书命令。 */
 public final class Main {
     private Main() {}
 
     public static void main(String[] args) {
         if (args.length == 0 || args[0].equals("桌面")) {
-            DesktopMain.main(
-                    args.length == 0 ? new String[0] : Arrays.copyOfRange(args, 1, args.length));
+            launchDesktop(Path.of(args.length > 1 ? args[1] : "config/local/client.properties"));
             return;
         }
         int status;
@@ -43,6 +48,27 @@ public final class Main {
             Stack.releaseSharedResources();
         }
         System.exit(status);
+    }
+
+    private static void launchDesktop(Path config) {
+        if (GraphicsEnvironment.isHeadless()) throw new IllegalStateException("桌面客户端需要图形桌面环境");
+        SwingUtilities.invokeLater(
+                () -> {
+                    try {
+                        UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
+                        var font = new FontUIResource(Font.DIALOG, Font.PLAIN, 14);
+                        for (Object key : java.util.List.copyOf(UIManager.getDefaults().keySet()))
+                            if (UIManager.get(key) instanceof Font) UIManager.put(key, font);
+                        ClientSettings.prepare(config, Path.of("config/templates"));
+                        new ServerWindow(ClientSettings.load(config), config).setVisible(true);
+                    } catch (Exception e) {
+                        JOptionPane.showMessageDialog(
+                                null,
+                                "无法启动客户端。\n" + ServerWindow.failure(e),
+                                "启动失败",
+                                JOptionPane.ERROR_MESSAGE);
+                    }
+                });
     }
 
     static int run(String[] args) throws Exception {

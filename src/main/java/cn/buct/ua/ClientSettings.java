@@ -1,5 +1,6 @@
 package cn.buct.ua;
 
+import org.bouncycastle.util.IPAddress;
 import org.eclipse.milo.opcua.stack.core.security.SecurityPolicy;
 import org.eclipse.milo.opcua.stack.core.types.enumerated.MessageSecurityMode;
 import org.eclipse.milo.opcua.stack.core.types.structured.EndpointDescription;
@@ -7,9 +8,12 @@ import org.eclipse.milo.opcua.stack.core.types.structured.EndpointDescription;
 import java.io.IOException;
 import java.io.Reader;
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import java.util.Properties;
@@ -76,6 +80,70 @@ public record ClientSettings(
                 || endpoint.getFragment() != null) {
             throw new IllegalArgumentException("端点必须是带主机和有效端口的 opc.tcp 地址，不含凭据、查询或片段");
         }
+    }
+
+    /** 首次准备本机配置；正常读取不会创建或覆盖文件。 */
+    static void prepare(Path configFile, Path templates) throws IOException {
+        if (Files.exists(configFile)) return;
+        Files.createDirectories(configFile.toAbsolutePath().normalize().getParent());
+        try {
+            Files.copy(templates.resolve("client.properties"), configFile);
+        } catch (FileAlreadyExistsException ignored) {
+            /* 其他启动进程已创建个人配置，保留该文件。 */
+        }
+    }
+
+    static URI parseEndpoint(String text) {
+        URI parsed = URI.create(text.trim());
+        validateEndpoint(parsed);
+        return parsed;
+    }
+
+    static URI withHost(String address, String host) throws URISyntaxException {
+        URI original = parseEndpoint(address);
+        if (host == null || host.isBlank()) throw new IllegalArgumentException("请输入目标服务器 IP 或主机名");
+        return parseEndpoint(
+                new URI(
+                                        original.getScheme(),
+                                        null,
+                                        host.trim(),
+                                        original.getPort(),
+                                        null,
+                                        null,
+                                        null)
+                                .toString()
+                        + Objects.toString(original.getRawPath(), ""));
+    }
+
+    /** 界面或调用方传入连接参数，保留部署安全配置；不改磁盘文件。 */
+    ClientSettings withConnection(String serverAddress, String remoteHost, String selectedUsername)
+            throws URISyntaxException {
+        boolean addressProvided = serverAddress != null && !serverAddress.isBlank();
+        boolean hostProvided = remoteHost != null && !remoteHost.isBlank();
+        URI target = endpoint;
+        if (addressProvided) {
+            String text = serverAddress.trim();
+            target =
+                    text.contains("://")
+                            ? parseEndpoint(text)
+                            : withHost(endpoint.toString(), text);
+        }
+        if (hostProvided) target = withHost(target.toString(), remoteHost);
+        return new ClientSettings(
+                target,
+                policy,
+                mode,
+                identityType,
+                selectedUsername == null ? username : selectedUsername.trim(),
+                passwordEnv,
+                applicationUri,
+                applicationName,
+                timeoutMs,
+                pkiDirectory,
+                pkiPasswordEnv,
+                addressProvided || hostProvided ? target : discoveryEndpoint,
+                pki,
+                serverTrust);
     }
 
     public static ClientSettings load(Path file) throws IOException {
@@ -161,5 +229,61 @@ public record ClientSettings(
         String value = p.getProperty(key, "").trim();
         if (value.isEmpty()) throw new IllegalArgumentException("缺少配置：" + key);
         return value;
+    }
+
+    /** 证书生成和现有 PKCS12 身份的部署参数；不保存口令。 */
+    public record PkiSettings(
+            String fileName,
+            String alias,
+            String commonName,
+            String organization,
+            List<String> dnsNames,
+            List<String> ipAddresses,
+            int validityDays) {
+        public PkiSettings {
+            if (fileName == null
+                    || !fileName.matches("[A-Za-z0-9][A-Za-z0-9._-]*")
+                    || fileName.endsWith(".")
+                    || fileName.equalsIgnoreCase("client.der")
+                    || fileName.matches("(?i)(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\\..*)?")) {
+                throw new IllegalArgumentException("pki.file 必须是可移植的英文文件名，且不能占用公开证书 client.der");
+            }
+            if (alias == null
+                    || alias.isBlank()
+                    || commonName == null
+                    || commonName.isBlank()
+                    || organization == null
+                    || organization.isBlank()) {
+                throw new IllegalArgumentException("证书别名、名称和组织不能为空");
+            }
+            dnsNames = List.copyOf(dnsNames);
+            ipAddresses = List.copyOf(ipAddresses);
+            if (dnsNames.stream().anyMatch(String::isBlank)
+                    || ipAddresses.stream().anyMatch(ip -> !IPAddress.isValid(ip))) {
+                throw new IllegalArgumentException("证书 DNS 名不能为空，IP SAN 必须是有效 IPv4/IPv6 地址");
+            }
+            if (validityDays < 1 || validityDays > 3650)
+                throw new IllegalArgumentException("证书有效天数必须为 1—3650");
+        }
+
+        static PkiSettings defaults(String applicationName) {
+            return from(new Properties(), applicationName);
+        }
+
+        static PkiSettings from(Properties p, String applicationName) {
+            return new PkiSettings(
+                    p.getProperty("pki.file", "client.p12").trim(),
+                    p.getProperty("pki.alias", "ua-client").trim(),
+                    p.getProperty("pki.commonName", applicationName).trim(),
+                    p.getProperty("pki.organization", "UA Development").trim(),
+                    names(p.getProperty("pki.dnsNames", "")),
+                    names(p.getProperty("pki.ipAddresses", "")),
+                    Integer.parseInt(p.getProperty("pki.validityDays", "365").trim()));
+        }
+
+        private static List<String> names(String text) {
+            if (text.isBlank()) return List.of();
+            return Arrays.stream(text.split(",", -1)).map(String::trim).toList();
+        }
     }
 }

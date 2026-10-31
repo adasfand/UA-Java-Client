@@ -8,6 +8,22 @@ import org.eclipse.milo.opcua.stack.core.types.builtin.NodeId;
 final class UaAddress {
     private UaAddress() {}
 
+    /** 桌面分栏输入；标识符文本原样保留，避免改变含空格的字符串节点。 */
+    static String fromParts(String namespace, String identifier) {
+        String space = namespace == null ? "" : namespace.trim();
+        if (!(space.matches("ns=[0-9]+")
+                || (space.startsWith("nsu=") && space.length() > 4 && !space.contains(";"))))
+            throw new IllegalArgumentException("命名空间请填 nsu=实际URI 或 ns=数字，例如 nsu=KEPServerEX。");
+        if (identifier == null
+                || identifier.length() < 3
+                || identifier.charAt(1) != '='
+                || "isgb".indexOf(identifier.charAt(0)) < 0)
+            throw new IllegalArgumentException("节点标识请包含类型前缀，例如 s=WriteDemo.Device1.sim 或 i=2258。");
+        String address = space + ";" + identifier;
+        parse(address);
+        return address;
+    }
+
     static ExpandedNodeId parse(String address) {
         if (address == null || address.isBlank())
             throw new IllegalArgumentException("请提供 OPC UA NodeId 地址");

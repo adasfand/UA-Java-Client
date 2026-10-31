@@ -6,14 +6,13 @@
 
 ```java
 UaClient ua = new UaClient(Path.of("config/local/client.properties"));
-ua.connect(serverAddress, remoteHost, username, userPassword, keystorePassword);
+ua.connect(serverAddress, username, userPassword, keystorePassword);
 ```
 
 | 参数 | Java类型 | 作用 |
 | --- | --- | --- |
 | configFile | Path，构造器参数 | 安全配置文件，仅初始化客户端时指定一次 |
 | serverAddress | String | 完整 `opc.tcp://主机:端口/路径`，也接受IP/主机名；只传IP时沿用配置中的端口和路径 |
-| remoteHost | String | 手动输入的目标服务器IP或主机名，替换服务器地址的主机，保留端口及路径；API传null/空时使用serverAddress中的主机 |
 | username | String | 服务器账号；null时使用配置中的用户名；anonymous身份不使用账号密码 |
 | userPassword | char[] | 服务器账号密码；null/空数组时从identity.passwordEnv指定的环境变量取值 |
 | keystorePassword | char[] | 客户端私钥库口令；null/空数组时从pki.passwordEnv指定的环境变量取值 |
@@ -24,9 +23,9 @@ ua.connect(serverAddress, remoteHost, username, userPassword, keystorePassword);
 
 已配置账号和凭据环境变量时，可简写 `ua.connect(serverAddress)`。传入非空地址时，连接和发现均使用本次地址，避免旧配置中的本机发现地址误用于另一服务器；serverAddress和remoteHost均传null/空时使用文件中完整的连接和独立发现配置。
 
-服务器地址与远程IP分别传入时，可使用`ua.connect(serverAddress, remoteHost)`，或上面的五参数重载。原四参数`connect(serverAddress, username, userPassword, keystorePassword)`继续可用。只要传入地址或远程主机，发现与连接都会使用合成后的最终URL；两者都未提供时，才保留文件中的独立发现配置。该IP对应旧C#的“远程IP地址”，是目标服务器IP，不是客户端本机的绑定IP。
+推荐使用上面的四参数接口；安全配置部署完毕、凭据通过环境变量准备时也可只传serverAddress。为兼容已有调用方，仍保留`connect(serverAddress, remoteHost)`和五参数重载；remoteHost为String，用于替换URL的目标服务器主机，不是客户端绑定IP。只要传入地址或远程主机，发现与连接都会使用合成后的最终URL；两者都未提供时，保留文件中的独立发现配置。
 
-桌面从“服务器 → 连接…”打开小窗口。“服务器地址”填写KEP端点列表中的一条完整URL，“目标服务器IP”填写目标IP或匹配的主机名。成功后只保存最终endpoint URL，下一次从URL恢复两个输入框。输入值、已有配置或公开模板提供地址，Java代码不固定现场IP；改变目标IP也不会跳过服务器端点匹配和证书主机名/IP校验。
+桌面在固定的“服务器地址 / IP”输入框填写KEP的一条完整URL，或只填目标服务器IP/主机名并沿用配置端口、路径。输入账号、用户密码、本机私钥库密码后直接点击连接，无查询电脑名或连接弹窗。成功后保存最终endpoint URL。Java代码不固定现场IP；改变目标IP也不会跳过服务器端点匹配和证书主机名/IP校验。
 
 UA使用endpoint URL，旧C#的`Connect(IP, ProgID)`是OPC DA接口，不能原样套用。服务器地址中本来就包括主机/IP和端口，UA不需要再查询本地电脑名称。
 
@@ -69,11 +68,15 @@ Good表示服务器接受了写服务，不保证数值永远不变或现场物�
 
 ```text
 ns=0;i=2258
-ns=2;s=DemoChannel.DemoDevice.sim
-nsu=KEPServerEX;s=DemoChannel.DemoDevice.sim
+ns=2;s=WriteDemo.Device1.sim
+nsu=KEPServerEX;s=WriteDemo.Device1.sim
 ```
 
 第一项是标准服务器时间，可用于首次读测试。后两项只是本机模拟点示例，现场必须给出实际地址。`nsu`按命名空间URI解析当前索引，避免不同服务器固定假定ns=2；`ns`使用现场给出的当前索引。也支持标准GUID/ByteString标识符。
+
+桌面把地址拆成两栏：“命名空间”填`nsu=KEPServerEX`或现场给出的`ns=数字`；“节点标识”填`s=WriteDemo.Device1.sim`，数字标识则填`i=数字`。程序用分号拼接，校验后传给同一套读写接口；公开API仍只接收完整address字符串，不增加调用参数。
+
+地址由现场/服务器管理员提供，或使用UA客户端浏览节点取得。示例的`KEPServerEX`为命名空间URI，`WriteDemo.Device1.sim`为节点标识，对应KEP通道、设备、标签。服务器endpoint URL只用于连接，KEP标签属性中的`K0001`只用于驱动访问模拟设备，这两者均不能直接替代读写NodeId。
 
 旧DA ItemId如`A151TT_06102A/ALM1/PV.CV`不能直接认定为UA地址。应向现场索取它对应的namespace URI/index与identifier，不自动补上`ns=2;s=`。不需要在Java UI新建服务器点位。
 
@@ -89,7 +92,7 @@ char[] certificatePassword = /* 从本机UI或凭据来源取得 */ new char[0];
 try (UaClient ua = new UaClient(Path.of("config/local/client.properties"))) {
     ua.connect("opc.tcp://127.0.0.1:49320", "现场账号",
             accountPassword, certificatePassword);
-    String address = "nsu=KEPServerEX;s=DemoChannel.DemoDevice.sim";
+    String address = "nsu=KEPServerEX;s=WriteDemo.Device1.sim";
     double current = ((Number) ua.read(address)).doubleValue();
     System.out.println(current);
     // 仅对已确认可写的目标执行；业务地址可在调用方常量或配置中提供。
@@ -125,31 +128,30 @@ try (UaClient ua = new UaClient(Path.of("config/local/client.properties"))) {
 
 ## 7. 本项目的函数调用过程
 
-桌面入口为`Main.main(无参数)` → `DesktopMain.main` → `ServerWindow`。窗口收集连接和读写参数，在`SwingWorker`后台线程调用同一套公开接口。
+桌面入口为`Main.main(无参数)` → `Main.launchDesktop` → `ServerWindow`。连接参数在主页面直接输入，点击连接调用四参数接口。命名空间与节点标识经`UaAddress.fromParts`组合为读写共用的完整NodeId，写入另填值。在`SwingWorker`后台线程调用同一套公开接口，结果与错误显示在页面内。
 
 | 操作 | 调用过程 | 结果处理 |
 | --- | --- | --- |
-| 连接 | `UaClient.connect` → `ClientSettings.load` → `DesktopEndpoint.connection` → `UaConnection` | 加载安全配置及客户端身份，内部发现并匹配端点，校验服务器证书，建立认证会话；失败抛异常 |
+| 连接 | `UaClient.connect` → `ClientSettings.load/withConnection` → `UaConnection` | 加载安全配置及客户端身份，内部发现并匹配端点，校验服务器证书，建立认证会话；失败抛异常 |
 | 读取 | `UaClient.read` → `readData` → `UaConnection.readAddress` → Milo `readValuesAsync` | 按当前命名空间解析地址，读取Value、质量和时间；公开接口确认Good后返回 |
 | 写入 | `UaClient.write` → `UaConnection.writeAddress` → `ScalarValue.convert` → `writeOnce` | 读取节点类型与权限，转换目标类型，提交一次写服务并核对服务及逐点状态 |
 | 断开 | `UaClient.close` → `UaConnection.close` | 清除会话引用和连接持有的凭据，释放会话、传输与信任库资源 |
 
-连接中，`LocalPki.load`打开已有私钥库；`UaServices.discover`执行内部端点发现；`ClientSettings.selectEndpoint`按配置的URL、安全策略、模式和身份类型选择端点；`ServerTrust.create`实施strict或first-use校验；Milo `connectAsync`建立会话。发现成功并不等于用户认证成功。
+连接中，`LocalPki.load`打开已有私钥库；`UaConnection.discover`执行内部端点发现；`ClientSettings.selectEndpoint`按配置的URL、安全策略、模式和身份类型选择端点；`ServerTrust.create`实施strict或first-use校验；Milo `connectAsync`建立会话。发现成功并不等于用户认证成功。
 
-首次缺少身份时，服务器连接窗口显示“首次准备客户端证书…”。用户现在设置并确认一个新密码，调用`UaClient.initializeCertificate` → `LocalPki.initialize`，用该密码保护即将生成的client.p12；不需要已有证书密码，不依赖目标地址或KEP账号密码，也不建立会话。验证非空口令后才创建目录，生成两个文件后显示实际路径及打开目录入口，提示用户完成KEP信任。已有身份时省略首次准备入口，首次加载时才输入创建client.p12时设置的密码。只在生成或连接成功后缓存该口令，绑定私钥库路径、别名及文件版本，失败或退出清零。连接成功后，桌面通过`ClientConfiguration`保存实际地址、发现地址和用户名；保存失败与会话连接结果分别提示。
+首次缺少身份时，页面显示“确认新密码”和“首次生成客户端证书”。在本机私钥库密码及确认栏设置相同的新密码，调用`UaClient.initializeCertificate` → `LocalPki.initialize`生成身份；不需要已有证书密码，不依赖目标地址或KEP账号，也不建立会话。成功后结果区显示实际文件位置及KEP信任说明。已有身份不再显示生成和确认控件，直接填原私钥库密码连接。口令保留在本次窗口的密码框内供重连使用，临时数组在请求结束后清零，退出清空输入，不保存到配置。连接成功后通过`ClientConfiguration`保存实际地址、发现地址和用户名；保存失败与会话连接结果分别提示。保存使用连接前的配置快照，外部修改时拒绝覆盖。
 
 客户端主动连接KEPServerEX，在同一会话内双向交换读写请求与结果。Java程序不提供服务器监听或供KEP反向登录的接口。
 
 | 文件 | 职责 |
 | --- | --- |
 | UaClient.java | 对上层公开connect/read/write，管理单个会话 |
-| UaConnection.java | Milo认证连接、按地址读写与资源释放 |
-| UaServices.java | 内部端点发现及发现连接资源释放 |
+| UaConnection.java | Milo端点发现、认证连接、按地址读写与资源释放 |
 | UaAddress.java | NodeId解析与命名空间URI映射 |
 | ScalarValue.java | 将输入转换为服务端要求的基本标量类型 |
-| ClientSettings.java、ClientConfiguration.java | 配置读取校验及地址/用户名保存，保留相对路径并检测外部修改 |
-| LocalPki.java、PkiSettings.java、ServerTrust.java | 客户端身份生成/加载、证书参数与服务器信任 |
-| Main.java、DesktopMain.java、ServerWindow.java | 部署命令、桌面启动及最简操作窗口 |
+| ClientSettings.java、ClientConfiguration.java | 配置首次准备、读取及地址合成、证书参数校验和UI保存；保留相对路径并检测外部修改 |
+| LocalPki.java、ServerTrust.java | 客户端身份生成/加载与服务器信任；证书参数集中在ClientSettings内部 |
+| Main.java、ServerWindow.java | 统一启动入口、部署命令及最简操作窗口 |
 
 ## 8. 部署命令与验证边界
 
@@ -175,7 +177,7 @@ try (UaClient ua = new UaClient(Path.of("config/local/client.properties"))) {
 | 尚无本机客户端身份 | 现在自行设置并确认一个新密码 | 生成密钥对及客户端证书，用新密码保存client.p12，并导出client.der |
 | 已有client.p12 | 输入创建该文件时设置的密码 | 本机打开私钥库，加载原密钥及证书，不重新生成身份 |
 
-密码保护的是包含私钥的PKCS12文件，不是公开证书本身。client.der没有上述密码，不需要把client.p12或私钥库密码交给KEP。KEP用户名/密码是另外一组凭据，由KEP用户管理器维护，用于用户认证和权限判断。UI中的首次设置与已有文件解锁已分成两种明确提示。
+密码保护的是包含私钥的PKCS12文件，不是公开证书本身。client.der没有上述密码，不需要把client.p12或私钥库密码交给KEP。KEP用户名/密码是另外一组凭据，由KEP用户管理器维护，用于用户认证和权限判断。UI在主页面输入私钥库密码；首次设置时多一个确认栏，普通连接不弹窗。
 
 client.p12和client.der都属于同一个Java客户端身份；KEP服务器另有自己独立的身份和证书。双向验证涉及这两端应用身份，不能以生成了两个客户端文件作为已经完成双向认证的证据。
 
@@ -199,7 +201,7 @@ KEP对自签名客户端证书的信任通过其“受信任的客户端”管�
 | security.serverTrust=strict | 连接前独立核对并导入服务器公开证书，或配置受信任签发者 | 继续完整校验证书；未知身份拒绝 |
 | security.serverTrust=first-use | 首次接受选定端点证书并固定，未独立确认最初身份来源 | 校验证书属性及固定记录；证书变化拒绝 |
 
-共享模板当前为first-use，不能把这种首次信任方式描述成“双方已提前人工核准”。如果验收要求预先批准双方身份，部署配置应采用strict；程序已支持该方式，普通连接窗口不编辑安全策略。
+共享模板当前为first-use，不能把这种首次信任方式描述成“双方已提前人工核准”。如果验收要求预先批准双方身份，部署配置应采用strict；程序已支持该方式，普通操作页面不编辑安全策略。
 
 strict部署步骤：
 
@@ -213,7 +215,7 @@ strict部署步骤：
 
    命令只导入公开证书，核对指纹并保存到pki.directory下的trust-store/trusted/certs。KEP配置管理器中的“受信任的服务器”管理的是KEP自身作为客户端时的信任，不会替本Java进程导入证书。
 
-4. 在普通UI填目标端点、IP、KEP账号及密码，再连接。私钥库密码只在本机加载身份时使用，不是发给KEP的登录密码；双方应用身份校验通过后，KEP再认证用户并决定其读写权限。
+4. 在普通UI的服务器地址/IP栏填目标端点，再填KEP账号、用户密码和本机私钥库密码，点击连接。私钥库密码只在本机加载身份时使用，不是发给KEP的登录密码；双方应用身份校验通过后，KEP再认证用户并决定其读写权限。
 
 ### 验收与证据边界
 

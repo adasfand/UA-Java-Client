@@ -2,7 +2,19 @@
 
 使用Java 21、Swing和Eclipse Milo 1.1.6，提供三个可供上层调用的接口：`connect(...)`、`read(address)`、`write(address, value)`。先建立认证会话，再按现场提供的UA地址读取或写入。
 
-桌面参照旧C#的独立服务器连接窗口：主窗口只显示读、写及结果；“服务器 → 连接…”打开小窗口，填写服务器地址、目标服务器IP和KEP账号密码。安全策略及证书路径从文件加载，不在普通连接窗口编辑。
+桌面固定位置输入服务器地址/IP、用户名、用户密码和本机私钥库密码，直接点击连接。读写地址保留命名空间、节点标识两栏，写入另填值。普通操作不弹窗；安全策略、证书路径等部署配置从文件加载。
+
+## 阅读代码的顺序
+
+生产源码共10个Java文件。初次阅读只需先看这3个：
+
+| 顺序 | 文件 | 只需先弄懂的内容 |
+| --- | --- | --- |
+| 1 | Main.java | 启动窗口；提供部署用的配置和证书命令 |
+| 2 | UaClient.java | 给上层调用的connect、read、write和close |
+| 3 | ServerWindow.java | 界面收集参数，调用同一套UaClient接口 |
+
+其余文件是内部支撑：UaConnection负责Milo通信，ClientSettings和ClientConfiguration负责配置，LocalPki和ServerTrust负责证书，UaAddress和ScalarValue负责地址及类型处理。测试源码用于回归验证；target、dist和.cache是构建产物及缓存，不是需要逐个理解的业务代码。
 
 ## 运行
 
@@ -21,13 +33,13 @@ Windows双击 `start-client.cmd`，或在IDEA打开`Main.java`，点击`main`方
 ## 使用顺序
 
 1. 运行无参数Main，或双击启动器。缺少本机配置时从模板自动创建，已有配置保留。
-2. 点击“服务器 → 连接…”。“服务器地址”复制KEP的“OPC UA 配置管理器 → 服务器端点”列表中的一条URL；“目标服务器IP”填写运行KEP那台电脑的IP或匹配的主机名。IP替换URL主机，端口和路径保留。
-3. 首次没有身份时，点击“首次准备客户端证书…”，现在自行设置并确认一个新密码。程序用新密码保护即将生成的client.p12私钥库，不需要已有证书密码。成功提示显示两份文件的实际路径，可点击“打开证书目录”；公开的client.der不使用这个密码。
+2. 在“服务器地址 / IP”填写KEP“OPC UA 配置管理器 → 服务器端点”中的一条完整URL。也可只填目标服务器IP或主机名，端口和路径沿用部署配置；不再重复输入两份目标主机。
+3. 首次没有身份时，在“本机私钥库密码”和“确认新密码”设置相同新密码，点击“首次生成客户端证书”。程序用它保护即将生成的client.p12；结果区显示两份文件路径。公开的client.der不使用这个密码，已有身份不覆盖生成。
 4. 将公开证书client.der导入KEP的“受信任的客户端”，重新初始化使配置生效；私钥库client.p12留在本机。生成证书不等于已连接服务器。
-5. 在连接窗口填写KEP用户管理器中创建的用户名及密码，点击“连接”。已有身份在本次进程首次加载时提示输入创建client.p12时设置的密码；刚生成或已成功加载的同一身份可在进程内复用。只有认证会话成功才关闭连接窗口、启用读写。
-6. 读取地址可先填标准服务器时间`ns=0;i=2258`，点击读取，应显示值、Good及源时间。随后使用现场确认的UA NodeId。
-7. 写入填写目标NodeId及值，点击写入；Good表示服务器接受写服务。需要核对时再点读取，或通过KEP Quick Client观察。
-8. 从“服务器 → 断开”关闭连接。退出时释放会话并清空进程内口令。修改代码后须重新构建、重新运行Main加载新版。
+5. 在主页面填写KEP用户名、用户密码，以及创建client.p12时设置的本机私钥库密码，点击“连接”。认证成功才启用读写，不另弹口令窗口。同次运行内输入保留；退出清空，密码不写入文件。
+6. “命名空间”填`ns=0`，“节点标识”填`i=2258`，点击读取，应显示服务器时间、Good及源时间；该节点不用于写测试。
+7. 改填现场确认可写节点的命名空间、节点标识及写入值，点击写入；Good表示服务器接受写服务。读写共用这两项，核对时直接点读取，或通过KEP Quick Client观察。
+8. 点击“断开”关闭连接。退出时释放会话并清空进程内口令。修改代码后须重新构建、重新运行Main加载新版。
 
 成功连接后最终URL及用户名写回同一份本机配置；密码不写入文件。修改目标地址或用户名会清空旧的服务器密码。双方证书信任由部署人员准备，客户端不能替服务器批准自身证书。
 
@@ -37,7 +49,7 @@ Windows双击 `start-client.cmd`，或在IDEA打开`Main.java`，点击`main`方
 
 ```java
 try (UaClient ua = new UaClient(Path.of("config/local/client.properties"))) {
-    ua.connect(serverAddress, remoteHost, username, userPassword, keystorePassword);
+    ua.connect(serverAddress, username, userPassword, keystorePassword);
     Object result = ua.read(address);
     ua.write(address, 12.5f);
 }
@@ -45,7 +57,26 @@ try (UaClient ua = new UaClient(Path.of("config/local/client.properties"))) {
 
 完整参数、返回值、函数调用过程与部署要求见 [API_GUIDE.md](API_GUIDE.md)；操作者复测见 [UI_TEST.md](UI_TEST.md)。
 
-地址由现场确认。例如`ns=0;i=2258`是标准服务器时间；`nsu=KEPServerEX;s=DemoChannel.DemoDevice.sim`只是本机示例。旧C#的DA ItemId/ProgID不是UA NodeId/endpoint，不自动猜测转换。
+## 读写地址填什么
+
+填写服务器已经提供的**完整OPC UA NodeId**，由现场或服务器管理员提供，也可使用UA客户端浏览节点取得。它与连接地址不同：
+
+UI将NodeId分成两栏填写，类型前缀也要保留；两栏之间的分号由程序补上：
+
+| UI输入框 | 填写示例 | 含义 |
+| --- | --- | --- |
+| 命名空间 | `nsu=KEPServerEX` | 指定服务器中的命名空间URI；也可用现场提供的`ns=数字`索引 |
+| 节点标识 | `s=WriteDemo.Device1.sim` | `s=`表示字符串标识，本例为通道.设备.标签；数字标识使用`i=数字` |
+
+以上合成为`nsu=KEPServerEX;s=WriteDemo.Device1.sim`，传给同一个`read(address)`或`write(address,value)`接口。
+
+| 用途 | 示例 | 从哪里取得 |
+| --- | --- | --- |
+| 连接服务器 | `opc.tcp://127.0.0.1:49320` | KEP的服务器端点列表 |
+| 读写具体标签 | `nsu=KEPServerEX;s=WriteDemo.Device1.sim` | 现场提供或UA节点浏览确认 |
+| 驱动访问模拟设备 | `K0001` | KEP标签的地址属性；不能直接填入Java读写框 |
+
+示例中的`KEPServerEX`是命名空间URI，`WriteDemo.Device1.sim`是本机标签的节点标识，对应通道WriteDemo、设备Device1、标签sim。其他服务器以实际NodeId为准；不要直接套用示例或固定假定命名空间索引为2。旧C#的DA ItemId/ProgID也不能直接当作UA NodeId/endpoint。
 
 ## 配置与目录
 

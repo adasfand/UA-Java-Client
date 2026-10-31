@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test;
 import java.net.URI;
 import java.nio.file.Path;
 
-class DesktopEndpointTest {
+class ClientSettingsTest {
     private ClientSettings base() {
         return new ClientSettings(
                 URI.create("opc.tcp://server.example:4840/ua"),
@@ -24,7 +24,7 @@ class DesktopEndpointTest {
                 Path.of("pki"),
                 "UA_KEYSTORE_PASSWORD",
                 URI.create("opc.tcp://server.example:4840/ua"),
-                PkiSettings.defaults("测试客户端"),
+                ClientSettings.PkiSettings.defaults("测试客户端"),
                 "strict");
     }
 
@@ -32,13 +32,13 @@ class DesktopEndpointTest {
     void changingRemoteHostPreservesPortAndPathAndSupportsIpv6() throws Exception {
         assertEquals(
                 "opc.tcp://192.0.2.10:4840/ua",
-                DesktopEndpoint.withHost(base().endpoint().toString(), "192.0.2.10").toString());
+                ClientSettings.withHost(base().endpoint().toString(), "192.0.2.10").toString());
         assertEquals(
                 "opc.tcp://[::1]:4840/ua",
-                DesktopEndpoint.withHost(base().endpoint().toString(), "::1").toString());
+                ClientSettings.withHost(base().endpoint().toString(), "::1").toString());
         assertEquals(
                 "opc.tcp://192.0.2.10:4840/ua%2Fserver",
-                DesktopEndpoint.withHost("opc.tcp://server.example:4840/ua%2Fserver", "192.0.2.10")
+                ClientSettings.withHost("opc.tcp://server.example:4840/ua%2Fserver", "192.0.2.10")
                         .toString());
     }
 
@@ -53,18 +53,19 @@ class DesktopEndpointTest {
                     "opc.tcp://user:secret@localhost:4840",
                     "opc.tcp://localhost:4840/?secret=x"
                 }) {
-            assertThrows(IllegalArgumentException.class, () -> DesktopEndpoint.address(invalid));
+            assertThrows(
+                    IllegalArgumentException.class, () -> ClientSettings.parseEndpoint(invalid));
         }
     }
 
     @Test
-    void connectionChangesAddressAndUsernameWithoutChangingConfiguredSecurityOrPki() {
+    void connectionChangesAddressAndUsernameWithoutChangingConfiguredSecurityOrPki()
+            throws Exception {
         var base = base();
         var url = URI.create("opc.tcp://other.example:49320/UA");
-        var discovery = URI.create("opc.tcp://192.0.2.10:49320");
-        var settings = DesktopEndpoint.connection(base, url, discovery, " new-user ");
+        var settings = base.withConnection(url.toString(), null, " new-user ");
         assertEquals(url, settings.endpoint());
-        assertEquals(discovery, settings.discoveryEndpoint());
+        assertEquals(url, settings.discoveryEndpoint());
         assertEquals(base.policy(), settings.policy());
         assertEquals(base.mode(), settings.mode());
         assertEquals("new-user", settings.username());
@@ -76,10 +77,9 @@ class DesktopEndpointTest {
     }
 
     @Test
-    void directConnectionKeepsExplicitConfiguredSecurity() {
+    void directConnectionKeepsExplicitConfiguredSecurity() throws Exception {
         var base = base();
-        var settings =
-                DesktopEndpoint.connection(base, base.endpoint(), base.discoveryEndpoint(), "user");
+        var settings = base.withConnection(null, null, "user");
         assertEquals(base.policy(), settings.policy());
         assertEquals(base.mode(), settings.mode());
     }

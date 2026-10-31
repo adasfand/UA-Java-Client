@@ -53,7 +53,7 @@ class DesktopWorkflowTest {
     @Test
     void firstLaunchCopiesConnectionTemplateWithoutAutomaticIdentity() throws Exception {
         Path config = directory.resolve("config/local/client.properties");
-        DesktopFiles.prepare(config, Path.of("config/templates"));
+        ClientSettings.prepare(config, Path.of("config/templates"));
         ClientSettings loaded = ClientSettings.load(config);
         assertFalse(Files.exists(loaded.pkiDirectory().resolve("client.p12")));
         assertArrayEquals(
@@ -65,7 +65,7 @@ class DesktopWorkflowTest {
     void configurationPreparationPreservesExistingPersonalFiles() throws Exception {
         Path config = directory.resolve("client.properties");
         Files.writeString(config, "# 用户自建连接参数\n");
-        DesktopFiles.prepare(config, Path.of("config/templates"));
+        ClientSettings.prepare(config, Path.of("config/templates"));
         assertEquals("# 用户自建连接参数\n", Files.readString(config));
     }
 

@@ -72,17 +72,8 @@ public final class UaClient implements AutoCloseable {
             throws Exception {
         if (isConnected()) throw new IllegalStateException("已有连接，请先断开再连接其他服务器");
         if (session != null) close();
-        ClientSettings base = ClientSettings.load(configFile);
-        URI target = DesktopEndpoint.target(base.endpoint(), serverAddress, remoteHost);
-        boolean provided =
-                serverAddress != null && !serverAddress.isBlank()
-                        || remoteHost != null && !remoteHost.isBlank();
         ClientSettings settings =
-                DesktopEndpoint.connection(
-                        base,
-                        target,
-                        provided ? target : base.discoveryEndpoint(),
-                        username == null ? base.username() : username);
+                ClientSettings.load(configFile).withConnection(serverAddress, remoteHost, username);
         char[] user = copy(userPassword);
         char[] store = copy(keystorePassword);
         try {
@@ -97,7 +88,7 @@ public final class UaClient implements AutoCloseable {
                 close();
                 throw new IllegalStateException("认证会话尚未建立");
             }
-            endpoint = target;
+            endpoint = settings.endpoint();
         } finally {
             Arrays.fill(user, '\0');
             Arrays.fill(store, '\0');

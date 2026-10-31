@@ -8,6 +8,25 @@ import org.junit.jupiter.api.Test;
 
 class UaAddressTest {
     @Test
+    void splitInputsResolveTheSameNodeAndPreserveIdentifierText() {
+        var namespaces = new NamespaceTable("http://opcfoundation.org/UA/", "KEPServerEX");
+        assertEquals(
+                new NodeId(0, 2258),
+                UaAddress.resolve(UaAddress.fromParts("ns=0", "i=2258"), namespaces));
+        assertEquals(
+                new NodeId(1, "Tag;with space "),
+                UaAddress.resolve(
+                        UaAddress.fromParts("nsu=KEPServerEX", "s=Tag;with space "), namespaces));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> UaAddress.fromParts("nsu=KEPServerEX;s=other", "s=tag"));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> UaAddress.fromParts("nsu=KEPServerEX", "K0001"));
+        assertThrows(IllegalArgumentException.class, () -> UaAddress.fromParts("", "s=tag"));
+    }
+
+    @Test
     void namespaceUriResolvesCurrentServerIndexInsteadOfAssumingTwo() {
         var first = new NamespaceTable("http://opcfoundation.org/UA/", "urn:other", "KEPServerEX");
         var second = new NamespaceTable("http://opcfoundation.org/UA/", "KEPServerEX");
