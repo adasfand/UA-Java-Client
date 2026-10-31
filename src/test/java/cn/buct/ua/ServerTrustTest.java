@@ -4,6 +4,7 @@ import static org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.Unsigned.
 import static org.junit.jupiter.api.Assertions.*;
 
 import org.eclipse.milo.opcua.stack.core.UaException;
+import org.eclipse.milo.opcua.stack.core.security.FileBasedTrustListManager;
 import org.eclipse.milo.opcua.stack.core.security.MemoryCertificateQuarantine;
 import org.eclipse.milo.opcua.stack.core.security.MemoryTrustListManager;
 import org.eclipse.milo.opcua.stack.core.security.SecurityPolicy;
@@ -81,6 +82,98 @@ class ServerTrustTest {
                 null,
                 null,
                 ubyte(0));
+    }
+
+    @Test
+    void verifiedServerCertificatePersistsInRealTrustedStoreAndStrictRejectsOtherIdentities()
+            throws Exception {
+        var settings = settings("strict", 4840);
+        var cert = certificate();
+        Path exported = directory.resolve("server.der");
+        Files.write(exported, cert.getEncoded());
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> LocalPki.trustServer(settings, exported, "00".repeat(32)));
+        assertFalse(Files.exists(settings.pkiDirectory().resolve("trust-store")));
+        LocalPki.trustServer(settings, exported, LocalPki.fingerprint(cert.getEncoded()));
+        Path certs = settings.pkiDirectory().resolve("trust-store/trusted/certs");
+        try (var paths = Files.list(certs)) {
+            assertEquals(1, paths.filter(Files::isRegularFile).count());
+        }
+        try (var trust =
+                FileBasedTrustListManager.createAndInitialize(
+                        settings.pkiDirectory().resolve("trust-store"))) {
+            assertEquals(1, trust.getTrustedCertificates().size());
+            var validator =
+                    ServerTrust.create(
+                            settings,
+                            endpoint(settings, cert),
+                            trust,
+                            new MemoryCertificateQuarantine());
+            assertDoesNotThrow(
+                    () ->
+                            validator.validateCertificateChain(
+                                    List.of(cert), SERVER_URI, new String[] {"localhost"}));
+            assertThrows(
+                    UaException.class,
+                    () ->
+                            validator.validateCertificateChain(
+                                    List.of(certificate()),
+                                    SERVER_URI,
+                                    new String[] {"localhost"}));
+            assertThrows(
+                    UaException.class,
+                    () ->
+                            validator.validateCertificateChain(
+                                    List.of(cert), SERVER_URI, new String[] {"wrong.example"}));
+            assertThrows(
+                    UaException.class,
+                    () ->
+                            validator.validateCertificateChain(
+                                    List.of(cert), "urn:wrong", new String[] {"localhost"}));
+        }
+    }
+
+    @Test
+    void serverCertificatePlacedDirectlyInTrustedDirectoryIsLoadedWithoutUiImport()
+            throws Exception {
+        var settings = settings("strict", 4840);
+        var cert = certificate();
+        Path certs = settings.pkiDirectory().resolve("trust-store/trusted/certs");
+        Files.createDirectories(certs);
+        Files.write(certs.resolve("server.der"), cert.getEncoded());
+        try (var trust =
+                FileBasedTrustListManager.createAndInitialize(
+                        settings.pkiDirectory().resolve("trust-store"))) {
+            assertEquals(1, trust.getTrustedCertificates().size());
+            var validator =
+                    ServerTrust.create(
+                            settings,
+                            endpoint(settings, cert),
+                            trust,
+                            new MemoryCertificateQuarantine());
+            assertDoesNotThrow(
+                    () ->
+                            validator.validateCertificateChain(
+                                    List.of(cert), SERVER_URI, new String[] {"localhost"}));
+            assertThrows(
+                    UaException.class,
+                    () ->
+                            validator.validateCertificateChain(
+                                    List.of(certificate()),
+                                    SERVER_URI,
+                                    new String[] {"localhost"}));
+        }
+    }
+
+    @Test
+    void invalidPublicCertificateCannotEnterTrustedStore() throws Exception {
+        var settings = settings("strict", 4840);
+        Path invalid = directory.resolve("invalid.der");
+        Files.writeString(invalid, "not a certificate");
+        assertThrows(
+                Exception.class, () -> LocalPki.trustServer(settings, invalid, "00".repeat(32)));
+        assertFalse(Files.exists(settings.pkiDirectory().resolve("trust-store")));
     }
 
     @Test

@@ -11,6 +11,7 @@ import org.eclipse.milo.opcua.sdk.client.identity.IdentityProvider;
 import org.eclipse.milo.opcua.sdk.client.identity.UsernameProvider;
 import org.eclipse.milo.opcua.stack.core.AttributeId;
 import org.eclipse.milo.opcua.stack.core.Stack;
+import org.eclipse.milo.opcua.stack.core.StatusCodes;
 import org.eclipse.milo.opcua.stack.core.UaException;
 import org.eclipse.milo.opcua.stack.core.security.FileBasedCertificateQuarantine;
 import org.eclipse.milo.opcua.stack.core.security.FileBasedTrustListManager;
@@ -33,7 +34,9 @@ import org.eclipse.milo.opcua.stack.transport.client.tcp.OpcTcpClientTransportCo
 import java.nio.CharBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -139,14 +142,38 @@ public final class UaConnection implements AutoCloseable {
 
     /** 按现场提供的UA地址读取Value，由上层直接传入节点地址。 */
     public DataValue readAddress(String address) throws Exception {
+        return readAddresses(List.of(address)).getFirst();
+    }
+
+    /** 同一会话批量读取；按请求顺序保留每个点的独立质量码。 */
+    List<DataValue> readAddresses(List<String> addresses) throws Exception {
         requireOpen();
-        NodeId id = UaAddress.resolve(address, client.getNamespaceTable());
+        var ids = new ArrayList<NodeId>();
+        var positions = new ArrayList<Integer>();
+        var values = new ArrayList<DataValue>(Collections.nCopies(addresses.size(), null));
+        for (int i = 0; i < addresses.size(); i++) {
+            try {
+                ids.add(UaAddress.resolve(addresses.get(i), client.getNamespaceTable()));
+                positions.add(i);
+            } catch (IllegalArgumentException invalidNode) {
+                values.set(
+                        i,
+                        new DataValue(
+                                new Variant(null),
+                                new org.eclipse.milo.opcua.stack.core.types.builtin.StatusCode(
+                                        StatusCodes.Bad_NodeIdUnknown),
+                                null,
+                                null));
+            }
+        }
+        if (ids.isEmpty()) return values;
         var results =
-                client.readValuesAsync(0.0, TimestampsToReturn.Both, List.of(id))
+                client.readValuesAsync(0.0, TimestampsToReturn.Both, ids)
                         .get(settings.timeoutMs(), TimeUnit.MILLISECONDS);
-        if (results == null || results.size() != 1 || results.getFirst() == null)
+        if (results == null || results.size() != ids.size())
             throw new IllegalStateException("读取返回数量或内容异常");
-        return results.getFirst();
+        for (int i = 0; i < results.size(); i++) values.set(positions.get(i), results.get(i));
+        return values;
     }
 
     /** 通用地址写入：按服务器类型转换，只写一次；不强制读取写Only点或回读动态点。 */

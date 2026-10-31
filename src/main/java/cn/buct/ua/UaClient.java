@@ -6,7 +6,10 @@ import org.eclipse.milo.opcua.stack.core.types.builtin.StatusCode;
 
 import java.net.URI;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 import java.util.Objects;
 import java.util.function.BiFunction;
 
@@ -14,6 +17,12 @@ import java.util.function.BiFunction;
 public final class UaClient implements AutoCloseable {
     interface Session extends AutoCloseable {
         DataValue read(String address) throws Exception;
+
+        default List<DataValue> readMany(List<String> addresses) throws Exception {
+            var results = new ArrayList<DataValue>();
+            for (String address : addresses) results.add(read(address));
+            return results;
+        }
 
         StatusCode write(String address, Object value) throws Exception;
 
@@ -71,10 +80,19 @@ public final class UaClient implements AutoCloseable {
             char[] keystorePassword)
             throws Exception {
         if (isConnected()) throw new IllegalStateException("已有连接，请先断开再连接其他服务器");
-        if (session != null) close();
         ClientSettings settings =
                 ClientSettings.load(configFile).withConnection(serverAddress, remoteHost, username);
-        char[] user = copy(userPassword);
+        connect(settings, userPassword, keystorePassword);
+    }
+
+    /** 桌面把已选登录方式随配置快照传入，不依赖先修改磁盘才能登录。 */
+    synchronized void connect(ClientSettings settings, char[] userPassword, char[] keystorePassword)
+            throws Exception {
+        Objects.requireNonNull(settings, "settings");
+        if (isConnected()) throw new IllegalStateException("已有连接，请先断开再连接其他服务器");
+        if (session != null) close();
+        boolean anonymous = settings.identityType().equals("anonymous");
+        char[] user = anonymous ? new char[0] : copy(userPassword);
         char[] store = copy(keystorePassword);
         try {
             session =
@@ -82,6 +100,8 @@ public final class UaClient implements AutoCloseable {
                             settings,
                             (environment, prompt) -> {
                                 boolean keyStore = prompt.equals("输入本机证书库密码");
+                                if (!keyStore && anonymous)
+                                    throw new IllegalStateException("匿名连接不提供服务器用户密码");
                                 return secret(keyStore ? store : user, environment);
                             });
             if (!session.isConnected()) {
@@ -123,6 +143,18 @@ public final class UaClient implements AutoCloseable {
             throw new IllegalStateException("读取结果缺少数据或质量码");
         if (!data.getStatusCode().isGood()) throw new UaException(data.getStatusCode());
         return data;
+    }
+
+    /** 表驱动采集使用；质量由各点独立判断，单点公开read接口的契约不变。 */
+    synchronized List<DataValue> readMany(List<String> addresses) throws Exception {
+        Session current = requireSession();
+        List<String> request = List.copyOf(addresses);
+        for (String address : request) UaAddress.parse(address);
+        if (request.isEmpty()) return List.of();
+        var results = current.readMany(request);
+        if (results == null || results.size() != request.size())
+            throw new IllegalStateException("批量读取结果数量与地址数量不一致");
+        return Collections.unmodifiableList(new ArrayList<>(results));
     }
 
     /** 写一次并返回服务器状态。Good表示服务器接受写服务，不表示物理动作完成或值永远不变。 */
@@ -178,6 +210,10 @@ public final class UaClient implements AutoCloseable {
         return new Session() {
             public DataValue read(String address) throws Exception {
                 return connection.readAddress(address);
+            }
+
+            public List<DataValue> readMany(List<String> addresses) throws Exception {
+                return connection.readAddresses(addresses);
             }
 
             public StatusCode write(String address, Object value) throws Exception {

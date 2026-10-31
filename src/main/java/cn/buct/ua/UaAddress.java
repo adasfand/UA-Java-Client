@@ -8,6 +8,22 @@ import org.eclipse.milo.opcua.stack.core.types.builtin.NodeId;
 final class UaAddress {
     private UaAddress() {}
 
+    /** 拆回桌面两栏，保留字符串标识中的分号和空格。 */
+    static String[] parts(String address) {
+        parse(address);
+        String local =
+                address.startsWith("svr=") ? address.substring(address.indexOf(';') + 1) : address;
+        if (local.startsWith("ns=") || local.startsWith("nsu=")) {
+            int split = local.indexOf(';');
+            String space = local.substring(0, split);
+            String identifier = local.substring(split + 1);
+            fromParts(space, identifier);
+            return new String[] {space, identifier};
+        }
+        fromParts("ns=0", local);
+        return new String[] {"ns=0", local};
+    }
+
     /** 桌面分栏输入；标识符文本原样保留，避免改变含空格的字符串节点。 */
     static String fromParts(String namespace, String identifier) {
         String space = namespace == null ? "" : namespace.trim();

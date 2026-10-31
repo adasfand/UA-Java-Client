@@ -118,6 +118,15 @@ public record ClientSettings(
     /** 界面或调用方传入连接参数，保留部署安全配置；不改磁盘文件。 */
     ClientSettings withConnection(String serverAddress, String remoteHost, String selectedUsername)
             throws URISyntaxException {
+        return withConnection(serverAddress, remoteHost, selectedUsername, identityType);
+    }
+
+    ClientSettings withConnection(
+            String serverAddress,
+            String remoteHost,
+            String selectedUsername,
+            String selectedIdentity)
+            throws URISyntaxException {
         boolean addressProvided = serverAddress != null && !serverAddress.isBlank();
         boolean hostProvided = remoteHost != null && !remoteHost.isBlank();
         URI target = endpoint;
@@ -133,7 +142,7 @@ public record ClientSettings(
                 target,
                 policy,
                 mode,
-                identityType,
+                selectedIdentity == null ? identityType : selectedIdentity,
                 selectedUsername == null ? username : selectedUsername.trim(),
                 passwordEnv,
                 applicationUri,
@@ -161,8 +170,19 @@ public record ClientSettings(
     static ClientSettings connectionTarget(
             Path file, ConnectionAction action, String address, String remoteHost, String username)
             throws IOException, URISyntaxException {
+        return connectionTarget(file, action, address, remoteHost, username, null);
+    }
+
+    static ClientSettings connectionTarget(
+            Path file,
+            ConnectionAction action,
+            String address,
+            String remoteHost,
+            String username,
+            String identityType)
+            throws IOException, URISyntaxException {
         Properties p = read(file);
-        ClientSettings base = from(p, file);
+        ClientSettings base = from(p, file).withConnection(null, null, username, identityType);
         if (action == ConnectionAction.ACTUAL
                 && p.getProperty("connection.actualUrl", "").isBlank())
             throw new IllegalArgumentException("尚未配置现场服务器地址 connection.actualUrl，请向现场确认后填写配置。");
@@ -199,7 +219,7 @@ public record ClientSettings(
                 policy,
                 mode,
                 identity,
-                identity.equals("username") ? required(p, "identity.username") : "",
+                p.getProperty("identity.username", "").trim(),
                 p.getProperty("identity.passwordEnv", "UA_PASSWORD"),
                 applicationUri,
                 required(p, "application.name"),
@@ -247,7 +267,11 @@ public record ClientSettings(
                 .orElseThrow(
                         () ->
                                 new IllegalArgumentException(
-                                        "没有匹配的端点：请核对 endpoint.url、发现地址、安全策略、模式及身份类型"));
+                                        "没有匹配的端点（登录方式："
+                                                + (identityType.equals("anonymous")
+                                                        ? "匿名"
+                                                        : "用户名/密码")
+                                                + "）：请核对服务器URL、安全策略、模式，以及服务器是否允许该登录方式"));
     }
 
     static Properties read(Path file) throws IOException {

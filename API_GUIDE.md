@@ -44,9 +44,9 @@ double number = ((Number) value).doubleValue(); // 已确认是数值点时
 
 唯一参数address为String，必须是现场确认的OPC UA NodeId。返回服务器Value的原始Java/Milo值，例如Integer、Float、Double、Boolean、String或无符号Number包装。不能把所有返回值强转为Double。合法的空值可能返回null；结果质量不是Good则抛异常，不能把失败当作0或旧值参与计算。
 
-上层需要质量和时间戳时使用 `DataValue data = ua.readData(address)`。默认以maxAge=0读取Value，要求服务器提供最新可用值，但并不保证绕过KEP自己的采集周期；没有新增Java应用内存缓存。
+上层需要质量和时间戳时使用 `DataValue data = ua.readData(address)`。默认以maxAge=0读取Value，要求服务器提供最新可用值，但并不保证绕过KEP自己的采集周期；这个单点接口直接访问服务器，不读取Java的Data缓存。
 
-旧C#使用`OPC_DS_CACHE`读取DA服务器缓存，再将结果写入Data字典。它不是让Java必须从自己的数组或内存缓存取数。上层计算、定时调用和数据保存由调用方负责。
+旧C#使用`OPC_DS_CACHE`读取DA服务器缓存，再将结果写入Data字典。Java对应的Excel驱动采集及Data缓存由`ItemDictionary`提供，见第10节；`items.getValue(name)`读取Java最近一轮内存值，`ua.read(address)`则发起一次服务器读取，两者用途不同。
 
 ## 3. 写入
 
@@ -116,7 +116,7 @@ try (UaClient ua = new UaClient(Path.of("config/local/client.properties"))) {
 | endpoint.url / endpoint.discoveryUrl | 默认UA服务地址和可选独立发现地址 |
 | security.policy / security.mode | 与服务器端点匹配；目前支持明确的非None策略及SignAndEncrypt |
 | security.serverTrust | strict预置信任或first-use首次固定服务器证书 |
-| identity.type / identity.username | username或anonymous及默认账号 |
+| identity.type / identity.username | username或anonymous及默认账号；连接窗口可切换，认证成功后保存选择 |
 | identity.passwordEnv | 账号密码的本机环境变量名，不是密码明文 |
 | application.uri / application.name | Java应用身份，URI必须与证书一致 |
 | pki.directory / pki.file / pki.alias | 本机私钥库目录、文件名和私钥别名 |
@@ -130,7 +130,7 @@ try (UaClient ua = new UaClient(Path.of("config/local/client.properties"))) {
 
 ## 7. 本项目的函数调用过程
 
-桌面入口为`Main.main(无参数)` → `Main.launchDesktop` → `ServerWindow`。连接小窗口的三个连接按钮经`ClientSettings.connectionTarget`选择地址后，统一调用四参数接口。命名空间与节点标识经`UaAddress.fromParts`组合为读写共用的完整NodeId，写入另填值。在`SwingWorker`后台线程调用同一套公开接口，结果与错误显示在页面内。
+桌面入口为`Main.main(无参数)` → `Main.launchDesktop` → `ServerWindow`。三个连接按钮经`ClientSettings.connectionTarget`选择地址和登录方式，调用包内`UaClient.connect(ClientSettings,char[],char[])`把同一快照传入真实会话；对上层的公共连接重载保持不变。匿名不读取/发送用户密码，不降级安全策略。命名空间与节点标识经`UaAddress.fromParts`组合为读写共用的完整NodeId；Excel选择也只带入该地址。网络和表格I/O均在SwingWorker中执行。
 
 | 操作 | 调用过程 | 结果处理 |
 | --- | --- | --- |
@@ -151,6 +151,8 @@ try (UaClient ua = new UaClient(Path.of("config/local/client.properties"))) {
 | UaConnection.java | Milo端点发现、认证连接、按地址读写与资源释放 |
 | UaAddress.java | NodeId解析与命名空间URI映射 |
 | ScalarValue.java | 将输入转换为服务端要求的基本标量类型 |
+| DeviceAddressTable.java | 读取Excel名称—UA地址映射，校验并原子保存本机规范副本 |
+| ItemDictionary.java | 按地址表分批读取、发布每轮Data快照，供上层按变量名取值 |
 | ClientSettings.java、ClientConfiguration.java | 配置首次准备、读取及地址合成、证书参数校验和UI保存；保留相对路径并检测外部修改 |
 | LocalPki.java、ServerTrust.java | 客户端身份生成/加载与服务器信任；证书参数集中在ClientSettings内部 |
 | Main.java、ServerWindow.java | 统一启动入口、部署命令及最简操作窗口 |
@@ -203,13 +205,13 @@ KEP对自签名客户端证书的信任通过其“受信任的客户端”管�
 | security.serverTrust=strict | 连接前独立核对并导入服务器公开证书，或配置受信任签发者 | 继续完整校验证书；未知身份拒绝 |
 | security.serverTrust=first-use | 首次接受选定端点证书并固定，未独立确认最初身份来源 | 校验证书属性及固定记录；证书变化拒绝 |
 
-共享模板当前为first-use，不能把这种首次信任方式描述成“双方已提前人工核准”。如果验收要求预先批准双方身份，部署配置应采用strict；程序已支持该方式，普通操作页面不编辑安全策略。
+共享模板及普通桌面连接使用strict。first-use仅保留为历史API配置兼容，不再作为桌面连接的信任来源；旧server-pins不会被自动搬入可信证书库，导入必须经过操作者确认。
 
 strict部署步骤：
 
 1. Java首次设置新密码并生成本机身份，将client.der交给KEP管理员导入受信任客户端，使服务器配置生效。
-2. 从KEP实例证书的Server区域导出服务器公开证书，由部署人员独立核对其SHA-256；不导出服务器私钥给Java。
-3. 在config/local/client.properties设置security.serverTrust=strict，通过现有部署命令导入服务器公开证书：
+2. 从KEP实例证书的Server区域导出服务器公开证书，确认所选文件来自目标服务器；跨机器传输时可另向服务器管理员核对SHA-256。服务器私钥留在服务器电脑。
+3. 在Java连接窗口点击“导入服务器证书…”，选择目标服务器导出的公开证书即导入，不再弹出详情确认框。文件选择是操作者对证书来源的确认；程序检查X.509格式、有效期，并校验两次读取的指纹一致，后台调用`LocalPki.trustServer`保存到`pki/trust-store/trusted/certs/`，通过同一个配置文件保存`security.serverTrust=strict`。导入成功只代表信任已配置，连接时仍验证应用证书、签名及身份。导入失败不报告成功；证书已导入但配置保存失败时单独提示。也可直接把服务器公开证书放入上述目录，在strict配置下重新连接，无需再通过UI重复导入。也可用部署命令（保留显式指纹参数）：
 
    ```powershell
    .\run.ps1 信任服务器 config/local/client.properties server.der 已独立核对的SHA256
@@ -217,7 +219,7 @@ strict部署步骤：
 
    命令只导入公开证书，核对指纹并保存到pki.directory下的trust-store/trusted/certs。KEP配置管理器中的“受信任的服务器”管理的是KEP自身作为客户端时的信任，不会替本Java进程导入证书。
 
-4. 在普通UI的服务器地址/IP栏填目标端点，再填KEP账号、用户密码和本机私钥库密码，点击连接。私钥库密码只在本机加载身份时使用，不是发给KEP的登录密码；双方应用身份校验通过后，KEP再认证用户并决定其读写权限。
+4. 输入目标端点并选择登录方式；用户名方式填服务器账号密码，匿名方式不发送用户密码。两种方式都填写本机私钥库密码并执行相同的应用证书校验。服务器还必须公布相应UserName/Anonymous令牌并授权实际点位权限。
 
 ### 验收与证据边界
 
@@ -232,3 +234,27 @@ strict部署步骤：
 现有自动测试验证了strict未知证书拒绝、导入后接受、first-use固定及换证拒绝、主机名和Application URI不匹配拒绝。KEP服务器侧拒绝、真实网络及现场策略必须通过真实联调单独验证；本轮没有执行这些操作。
 
 汇报可表述为：项目使用双方应用证书建立OPC UA安全会话，KEP验证Java身份，Java验证KEP身份，私钥分别保留本机；用户登录和点位权限是后续独立检查。已实现两端证书的配置与Java校验逻辑，正式预置信任采用strict，真实服务器的正反向拒绝测试按验收表记录，不以仅生成证书或发现端点作为通过依据。
+
+## 10. Excel地址字典与周期采集
+
+```java
+ItemDictionary items = ItemDictionary.load(Path.of("config/local/device-addresses.xlsx"));
+ItemDictionary.Snapshot round = items.refresh(ua); // ua已经连接；执行一轮，不写服务器
+Map<String, Object> Data = round.data(); // 按Excel第一列变量名索引，只含本轮Good值
+double pv = items.getDouble("TIC06000A"); // 实际表中包含这个数值变量时
+Object value = items.getValue("TIC06000A"); // 保留原始Java/Milo类型
+```
+
+使用Apache POI读取首张工作表前两列：设备/变量名称、完整UA NodeId。支持.xls/.xlsx，以及常见中英文表头或无表头。返回不可变列表；不依赖UI，也不把名称当NodeId。校验空行、缺列、重复名称、非文本/公式地址和非法UA地址，错误带行号；限制20MB、100000条映射。
+
+`DeviceAddressTable.importFile(source,target)`先校验源表，再原子生成两列规范.xlsx，不修改源表，不创建备份；失败保留旧目标。UI目标固定在当前client.properties同目录的device-addresses.xlsx，不保存外部绝对路径。启动自动加载该副本；选择设备只经`UaAddress.parts`带入两栏，不自动连接、采集或写值。
+
+旧C#启动时读取`itemDictionary.xlsx`为变量名→地址字典；“数据读取”启用2000毫秒定时器，逐条读入`Data[variableName]`，计算代码再按变量名取数。Java保留这个作用，导入文件可以叫`itemDictionary.xlsx`，本机规范副本仍统一为`config/local/device-addresses.xlsx`，不增加第二份配置。
+
+UI连接后点击“数据读取”，立即发起一轮并周期更新Data；再次点击停止后续轮次，正在进行的请求正常结束。断开会清空Data；重启需要重新连接并点击开始。选择变量只查看已采集值并带入单点地址，不启动网络请求。手动单点读写仍使用同一个UaClient，不自动写入Data字典。
+
+`ItemDictionary.refresh(ua)`是同步的一轮采集，独立调用方用自己的后台定时器调度；桌面已使用Swing Timer触发SwingWorker，界面线程不等待网络。`itemDictionary()`返回不可变地址映射；`snapshot()`保留本轮DataValue、逐变量错误和轮次完成时间；`data()`返回Good值快照。`getValue/getDouble`对未知、未读取或本轮失败的变量抛异常，不静默返回0或旧值。数值转换仅在getDouble时发生，非数值变量可使用getValue。
+
+默认`acquisition.intervalMs=2000`、`acquisition.batchSize=256`，读取旧配置缺键时沿用缺省值。UI采集不重叠；多批次不是服务器原子快照，源时间以各DataValue为准。每点坏质量仅使该点失败；一批传输整体失败后跳过本轮剩余批次，避免累积超时。所有结果在一轮结束时整体发布；失败点从本轮Data移除。停止后保留最后快照及时间，不能据此认定仍为实时数据。
+
+地址必须是UA NodeId；旧表实际包含的`DHSW.TIC06000A.PV`等是DA ItemId，需现场提供对应的UA NodeId，不能直接加前缀猜测。Excel只保存映射，不保存实时值；C#其他定时器里的历史数组、工艺算法和Excel日志是独立功能，本次未迁移。

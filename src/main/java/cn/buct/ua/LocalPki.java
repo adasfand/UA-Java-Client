@@ -35,7 +35,7 @@ import javax.swing.JPasswordField;
 import javax.swing.SwingUtilities;
 import javax.swing.WindowConstants;
 
-/** 持久化应用身份；只按人工核对的 SHA-256 导入服务端公开证书。 */
+/** 持久化应用身份；导入的服务端公开证书须与用户确认的指纹一致。 */
 public final class LocalPki {
     private LocalPki() {}
 
@@ -145,17 +145,11 @@ public final class LocalPki {
 
     public static void trustServer(ClientSettings settings, Path certificateFile, String expected)
             throws Exception {
-        X509Certificate certificate;
-        try (InputStream in = Files.newInputStream(certificateFile)) {
-            certificate =
-                    (X509Certificate)
-                            CertificateFactory.getInstance("X.509").generateCertificate(in);
-        }
-        certificate.checkValidity();
+        X509Certificate certificate = readPublicCertificate(certificateFile);
         String fingerprint = fingerprint(certificate.getEncoded());
-        String normalized = expected.replace(":", "").replace(" ", "");
+        String normalized = expected == null ? "" : expected.replace(":", "").replace(" ", "");
         if (!normalized.matches("(?i)[0-9a-f]{64}") || !fingerprint.equalsIgnoreCase(normalized)) {
-            throw new IllegalArgumentException("证书 SHA-256 与人工核对值不符，未导入");
+            throw new IllegalArgumentException("证书 SHA-256 与确认值不符，文件可能已变化，未导入");
         }
         try (var trust =
                 FileBasedTrustListManager.createAndInitialize(
@@ -163,6 +157,19 @@ public final class LocalPki {
             trust.addTrustedCertificate(certificate);
         }
         System.out.println("已导入人工确认的服务器证书，SHA-256：" + fingerprint);
+    }
+
+    /** 只读取公开的X.509证书；不接受私钥库，不更改任何信任。 */
+    static X509Certificate readPublicCertificate(Path file) throws Exception {
+        if (!Files.isRegularFile(file) || Files.size(file) > 1024 * 1024)
+            throw new IllegalArgumentException("请选择小于1MB的服务器公开证书（.der/.cer/.pem），不要选私钥库。");
+        try (InputStream in = Files.newInputStream(file)) {
+            X509Certificate certificate =
+                    (X509Certificate)
+                            CertificateFactory.getInstance("X.509").generateCertificate(in);
+            certificate.checkValidity();
+            return certificate;
+        }
     }
 
     /** 对证书链中的首张应用证书求指纹，与导入公开证书时的算法保持一致。 */

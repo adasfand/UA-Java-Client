@@ -16,7 +16,6 @@ import java.util.Objects;
 import java.util.Properties;
 import java.util.Set;
 import java.util.TreeMap;
-import java.util.UUID;
 
 /** UI 与本地配置共用的快照；保存时校验、检测冲突并原子替换。 */
 public final class ClientConfiguration {
@@ -75,13 +74,6 @@ public final class ClientConfiguration {
                     ClientSettings settings = ClientSettings.load(temporary);
                     verifySnapshot();
                     if (Arrays.equals(snapshot, bytes)) return settings;
-                    Path backup =
-                            file.resolveSibling("config-backup-" + UUID.randomUUID() + ".bak");
-                    Files.write(
-                            backup,
-                            snapshot,
-                            StandardOpenOption.CREATE_NEW,
-                            StandardOpenOption.WRITE);
                     Files.move(
                             temporary,
                             file,

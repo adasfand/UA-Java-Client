@@ -8,6 +8,23 @@ import org.junit.jupiter.api.Test;
 
 class UaAddressTest {
     @Test
+    void importedAddressesSplitAndRoundTripWithoutCorruptingStringIdentifiers() {
+        for (String address :
+                new String[] {
+                    "ns=0;i=2258",
+                    "nsu=KEPServerEX;s=WriteDemo.Device1.sim",
+                    "ns=2;s=Tag;with space ",
+                    "s=DefaultNamespaceTag",
+                    "svr=0;ns=2;s=Tag"
+                }) {
+            String[] parts = UaAddress.parts(address);
+            assertEquals(
+                    UaAddress.parse(address),
+                    UaAddress.parse(UaAddress.fromParts(parts[0], parts[1])));
+        }
+    }
+
+    @Test
     void splitInputsResolveTheSameNodeAndPreserveIdentifierText() {
         var namespaces = new NamespaceTable("http://opcfoundation.org/UA/", "KEPServerEX");
         assertEquals(

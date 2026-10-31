@@ -73,6 +73,48 @@ class GeneralizationTest {
     }
 
     @Test
+    void allConnectionButtonsHonorAnonymousModeWithoutRequiringAUsername() throws Exception {
+        var configured =
+                load(
+                        "connection.quickUrl=opc.tcp://quick.example:4841/ua\n"
+                                + "connection.actualUrl=opc.tcp://plant.example:4842/ua\n");
+        Path file = directory.resolve("client.properties");
+        for (var action : ClientSettings.ConnectionAction.values()) {
+            var anonymous =
+                    ClientSettings.connectionTarget(
+                            file,
+                            action,
+                            "opc.tcp://manual.example:4843/ua",
+                            "192.0.2.15",
+                            "",
+                            "anonymous");
+            assertEquals("anonymous", anonymous.identityType());
+            assertEquals("", anonymous.username());
+            assertEquals(configured.policy(), anonymous.policy());
+            assertEquals(configured.mode(), anonymous.mode());
+            assertEquals(configured.serverTrust(), anonymous.serverTrust());
+            assertThrows(
+                    IllegalArgumentException.class,
+                    () ->
+                            anonymous.selectEndpoint(
+                                    List.of(
+                                            endpoint(
+                                                    anonymous.endpoint().toString(),
+                                                    anonymous.policy(),
+                                                    UserTokenType.UserName))));
+            assertDoesNotThrow(
+                    () ->
+                            anonymous.selectEndpoint(
+                                    List.of(
+                                            endpoint(
+                                                    anonymous.endpoint().toString(),
+                                                    anonymous.policy(),
+                                                    UserTokenType.Anonymous))));
+        }
+        assertEquals("username", ClientSettings.load(file).identityType());
+    }
+
+    @Test
     void threeConnectionButtonsUseDistinctAddressSourcesWithIdenticalSecurity() throws Exception {
         var base =
                 load(

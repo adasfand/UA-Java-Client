@@ -61,6 +61,18 @@ class ClientConfigurationTest {
     }
 
     @Test
+    void loginModeRoundTripRetainsUsernameAndDoesNotPersistPasswordsOrBackups() throws Exception {
+        var editor = new ClientConfiguration(file);
+        var anonymous = editor.save(Map.of("identity.type", "anonymous"));
+        assertEquals("anonymous", anonymous.identityType());
+        assertEquals("old-user", anonymous.username());
+        var user = editor.save(Map.of("identity.type", "username"));
+        assertEquals("username", user.identityType());
+        assertEquals("old-user", user.username());
+        assertTrue(backups().isEmpty());
+    }
+
+    @Test
     void displayedSettingsUseTheCapturedVersionUntilReloaded() throws Exception {
         var displayed = new ClientConfiguration(file);
         Files.writeString(file, base().replace("old-user", "external-user"));
@@ -72,10 +84,9 @@ class ClientConfigurationTest {
     }
 
     @Test
-    void updatesEffectiveUsernameRemovesAllDuplicatesAndBacksUpExactBytes() throws Exception {
+    void updatesEffectiveUsernameRemovesAllDuplicatesWithoutLeavingBackups() throws Exception {
         String source = base() + "# 保留注释\nidentity.user\\u006eame = stale-user\n";
         Files.writeString(file, source);
-        byte[] before = Files.readAllBytes(file);
         var config = new ClientConfiguration(file);
         assertEquals("stale-user", config.values().get("identity.username"));
         assertThrows(
@@ -93,8 +104,7 @@ class ClientConfigurationTest {
                         .count());
         assertFalse(Files.readString(file).contains("stale-user"));
         assertTrue(Files.readString(file).contains("# 保留注释"));
-        assertEquals(1, backups().size());
-        assertArrayEquals(before, Files.readAllBytes(backups().getFirst()));
+        assertTrue(backups().isEmpty());
     }
 
     @Test
@@ -163,7 +173,7 @@ class ClientConfigurationTest {
         assertThrows(
                 IOException.class, () -> second.save(Map.of("identity.username", "second-user")));
         assertEquals("first-user", ClientSettings.load(file).username());
-        assertEquals(1, backups().size());
+        assertTrue(backups().isEmpty());
     }
 
     @Test

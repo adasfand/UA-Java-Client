@@ -200,6 +200,36 @@ class UaClientTest {
     }
 
     @Test
+    void anonymousSnapshotUsesOnlyKeystoreCredentialAndDoesNotChangeCallerArrays()
+            throws Exception {
+        char[] oldUserPassword = "not-for-anonymous".toCharArray();
+        char[] storePassword = "test-store".toCharArray();
+        var target = ClientSettings.load(config).withConnection(null, null, "", "anonymous");
+        try (var client =
+                new UaClient(
+                        config,
+                        (actual, credentials) -> {
+                            assertEquals("anonymous", actual.identityType());
+                            char[] supplied =
+                                    credentials.apply(actual.pkiPasswordEnv(), "输入本机证书库密码");
+                            assertArrayEquals(storePassword, supplied);
+                            Arrays.fill(supplied, '\0');
+                            assertThrows(
+                                    IllegalStateException.class,
+                                    () -> credentials.apply(actual.passwordEnv(), "服务器用户密码"));
+                            return new Session();
+                        })) {
+            client.connect(target, oldUserPassword, storePassword);
+            assertTrue(client.isConnected());
+            assertEquals(42, client.read(ADDRESS));
+        }
+        assertEquals("not-for-anonymous", new String(oldUserPassword));
+        assertEquals("test-store", new String(storePassword));
+        Arrays.fill(oldUserPassword, '\0');
+        Arrays.fill(storePassword, '\0');
+    }
+
+    @Test
     void secretProviderCopiesArraysAndNeverClearsCallerInput() throws Exception {
         char[] user = "test-account-secret".toCharArray();
         char[] store = "test-keystore-secret".toCharArray();
